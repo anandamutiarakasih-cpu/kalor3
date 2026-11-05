@@ -1,0 +1,344 @@
+/**
+ * THERMO CHAMPIONS: HEAT EDITION
+ * Game 1 - Shuffle and Recall Styles
+ */
+
+/* Game HUD */
+.tc-game-hud {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--tc-border);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: var(--shadow-card);
+}
+
+.tc-hud-title {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--tc-cream);
+}
+
+.tc-hud-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tc-hud-team {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.tc-hud-team-tag {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--tc-orange);
+}
+
+.tc-hud-score-tag {
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.tc-progress-counter {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--tc-yellow);
+  font-weight: 700;
+}
+
+.tc-progress-counter.complete {
+  color: var(--tc-green);
+}
+
+.tc-banner-instruction {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: rgba(249, 115, 22, 0.12);
+  border: 1px solid rgba(249, 115, 22, 0.35);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1.25rem;
+  font-size: 0.95rem;
+  color: var(--tc-cream);
+  margin-bottom: 1.75rem;
+}
+
+.tc-banner-instruction.pulse {
+  animation: bannerPulse 2s infinite ease-in-out;
+}
+
+@keyframes bannerPulse {
+  0%, 100% { border-color: rgba(56, 189, 248, 0.3); }
+  50% { border-color: rgba(56, 189, 248, 0.7); box-shadow: 0 0 15px var(--tc-sky-glow); }
+}
+
+/* =========================================
+   MEMORIZE PHASE (10 CARDS GRID)
+   ========================================= */
+.tc-memorize-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.25rem;
+  margin-bottom: 2rem;
+}
+
+.tc-mem-card {
+  background: var(--tc-dark-card);
+  border: 1px solid var(--tc-border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.25s var(--ease-spring), border-color 0.25s ease, box-shadow 0.25s ease;
+  animation: fadeInUpCard 0.4s var(--ease-smooth) backwards;
+}
+
+.tc-mem-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--tc-orange);
+  box-shadow: 0 8px 25px var(--tc-orange-glow);
+}
+
+@keyframes fadeInUpCard {
+  from {
+    opacity: 0;
+    transform: translateY(15px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.tc-mem-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.tc-mem-cat {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--tc-sky);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.tc-mem-icon {
+  font-size: 1.5rem;
+}
+
+.tc-mem-term {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: var(--tc-yellow);
+  margin-bottom: 0.35rem;
+}
+
+.tc-mem-tag {
+  display: inline-block;
+  align-self: flex-start;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  color: #94a3b8;
+  margin-bottom: 0.75rem;
+}
+
+.tc-mem-def {
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #e2e8f0;
+  margin-bottom: 0.85rem;
+  flex-grow: 1;
+}
+
+.tc-mem-example {
+  background: rgba(0, 0, 0, 0.25);
+  border-left: 3px solid var(--tc-orange);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.tc-mem-example strong {
+  display: block;
+  color: var(--tc-cream);
+  font-size: 0.75rem;
+  margin-bottom: 2px;
+}
+
+/* =========================================
+   PLAY PHASE (RECALL CHALLENGES)
+   ========================================= */
+.tc-challenges-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-bottom: 6rem; /* room for sticky bar */
+}
+
+.tc-challenge-card {
+  padding: 1.5rem;
+  border-color: rgba(56, 189, 248, 0.25);
+}
+
+.tc-ch-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.tc-ch-num {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--tc-orange);
+  letter-spacing: 0.08em;
+}
+
+.tc-ch-cat {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.tc-ch-prompt {
+  font-size: 0.95rem;
+  color: #cbd5e1;
+  margin-bottom: 0.85rem;
+}
+
+.tc-ch-target-box {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1.5px solid var(--tc-border);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1.15rem;
+  margin-bottom: 1.25rem;
+}
+
+.tc-target-icon {
+  font-size: 1.2rem;
+}
+
+.tc-ch-target-text {
+  font-size: 1.1rem;
+  color: var(--tc-yellow);
+}
+
+.tc-ch-options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem;
+}
+
+.tc-opt-btn {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  color: var(--tc-cream);
+  text-align: left;
+  font-family: var(--font-main);
+  font-size: 0.9rem;
+  transition: all 0.2s var(--ease-spring);
+}
+
+.tc-opt-indicator {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.tc-opt-btn:hover {
+  border-color: var(--tc-sky);
+  background: rgba(56, 189, 248, 0.1);
+}
+
+.tc-opt-btn.selected {
+  background: rgba(249, 115, 22, 0.18);
+  border-color: var(--tc-orange);
+  box-shadow: 0 0 15px var(--tc-orange-glow);
+}
+
+.tc-opt-btn.selected .tc-opt-indicator {
+  border-color: var(--tc-orange);
+  background: var(--tc-orange);
+  box-shadow: 0 0 8px var(--tc-orange);
+}
+
+/* Sticky Submit Bar */
+.tc-sticky-submit-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-top: 1.5px solid var(--tc-border);
+  padding: 1rem 1.5rem;
+  z-index: 50;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1.5rem;
+  box-shadow: 0 -8px 25px rgba(0, 0, 0, 0.5);
+}
+
+.tc-submit-info {
+  font-size: 0.9rem;
+  color: #94a3b8;
+}
+
+.tc-g1-finished-box {
+  width: 100%;
+  text-align: center;
+}
+
+.tc-fin-badge {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--tc-green);
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--radius-full);
+}
+
+.tc-g1-finished-box h3 {
+  font-size: 1.3rem;
+  margin: 0.3rem 0;
+  color: var(--tc-yellow);
+}
+
+.tc-g1-finished-box p {
+  font-size: 0.88rem;
+  color: #94a3b8;
+}
