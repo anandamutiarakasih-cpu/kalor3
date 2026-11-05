@@ -1,0 +1,172 @@
+/**
+ * THERMO CHAMPIONS: HEAT EDITION
+ * Responsive Styles - Mobile, Tablet, & Desktop Optimizations
+ */
+
+/* Small Tablets & Large Phones (max-width: 768px) */
+@media (max-width: 768px) {
+  .tc-view {
+    padding: 1rem 0.75rem 2.5rem 0.75rem;
+  }
+
+  .tc-main-title {
+    font-size: 2rem;
+  }
+
+  .tc-home-desc {
+    font-size: 0.95rem;
+  }
+
+  .tc-role-grid {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+
+  .tc-preview-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .tc-team-selector {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+  }
+
+  .tc-team-num-btn {
+    padding: 0.65rem 0.3rem;
+  }
+
+  .tc-num-val {
+    font-size: 1.25rem;
+  }
+
+  .tc-num-status {
+    font-size: 0.62rem;
+  }
+
+  .tc-member-row {
+    grid-template-columns: 1fr 80px 38px;
+    gap: 0.35rem;
+  }
+
+  .tc-game-hud {
+    flex-direction: column;
+    text-align: center;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+  }
+
+  .tc-hud-team {
+    text-align: center;
+    align-items: center;
+  }
+
+  .tc-memorize-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .tc-ch-options-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tc-opt-btn {
+    padding: 0.75rem 0.85rem;
+    font-size: 0.85rem;
+  }
+
+  .tc-sticky-submit-bar {
+    flex-direction: column;
+    text-align: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+  }
+
+  .tc-scramble-board {
+    padding: 1.5rem 1rem;
+  }
+
+  .tc-slot-box {
+    width: 42px;
+    height: 48px;
+    font-size: 1.35rem;
+  }
+
+  .tc-letter-tile {
+    width: 42px;
+    height: 48px;
+    font-size: 1.25rem;
+  }
+
+  .tc-lab-station-card {
+    padding: 1.5rem 1rem;
+  }
+
+  .tc-parameters-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tc-input-calc {
+    font-size: 1.15rem;
+    padding-right: 90px;
+  }
+
+  .tc-unit-addon {
+    font-size: 0.75rem;
+    right: 10px;
+    padding: 0.25rem 0.5rem;
+  }
+
+  .tc-podium-container {
+    gap: 0.5rem;
+    min-height: 240px;
+  }
+
+  .tc-podium-pedestal.p1 { height: 120px; font-size: 1.4rem; }
+  .tc-podium-pedestal.p2 { height: 90px; font-size: 1.3rem; }
+  .tc-podium-pedestal.p3 { height: 65px; font-size: 1.2rem; }
+
+  .tc-podium-medal { font-size: 2rem; }
+  .tc-podium-name { font-size: 0.9rem; max-width: 95px; }
+  .tc-podium-score { font-size: 1rem; }
+  .tc-podium-score.gold { font-size: 1.15rem; }
+
+  .tc-cockpit-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tc-cockpit-session-box {
+    justify-content: space-between;
+  }
+
+  .tc-phase-btn-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Extra Small Phones (max-width: 480px) */
+@media (max-width: 480px) {
+  .tc-main-title {
+    font-size: 1.7rem;
+  }
+
+  .tc-team-selector {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tc-slot-box {
+    width: 36px;
+    height: 42px;
+    font-size: 1.15rem;
+  }
+
+  .tc-letter-tile {
+    width: 36px;
+    height: 42px;
+    font-size: 1.1rem;
+  }
+
+  .tc-parameters-grid {
+    grid-template-columns: 1fr;
+  }
+}

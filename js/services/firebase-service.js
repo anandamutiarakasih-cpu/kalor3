@@ -1,0 +1,549 @@
+/**
+ * THERMO CHAMPIONS: HEAT EDITION
+ * Firebase Service & Realtime Synchronization Engine
+ */
+
+import { firebaseConfig } from '../config/firebase-config.js';
+import { getPredicate } from '../data/predicates.js';
+import {
+  SHUFFLE_CHALLENGES,
+  WORD_SCRAMBLE_ITEMS,
+  HEAT_CALCULATION_ITEMS
+} from '../data/questions-bank.js';
+
+class FirebaseService {
+  constructor() {
+    this.app = null;
+    this.db = null;
+    this.auth = null;
+    this.isFirebaseReady = false;
+    this.serverTimeOffset = 0;
+    this.broadcast = null;
+    this.listeners = new Map();
+
+    this.initBroadcastChannel();
+    this.initFirebase();
+  }
+
+  initBroadcastChannel() {
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        this.broadcast = new BroadcastChannel('thermo_champions_mesh');
+        this.broadcast.onmessage = (event) => {
+          this.handleBroadcastMessage(event.data);
+        };
+      } catch (e) {
+        console.warn('BroadcastChannel not supported:', e);
+      }
+    }
+  }
+
+  async initFirebase() {
+    try {
+      // Dynamically load Firebase SDK via CDN
+      const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js');
+      const { getDatabase, ref, onValue, set, update, get } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js');
+      const { getAuth, signInAnonymously } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js');
+
+      this.app = initializeApp(firebaseConfig);
+      this.db = getDatabase(this.app);
+      this.auth = getAuth(this.app);
+      this.fbRef = ref;
+      this.fbOnValue = onValue;
+      this.fbSet = set;
+      this.fbUpdate = update;
+      this.fbGet = get;
+
+      await signInAnonymously(this.auth);
+
+      // Listen for server time offset
+      const offsetRef = ref(this.db, '.info/serverTimeOffset');
+      onValue(offsetRef, (snap) => {
+        this.serverTimeOffset = snap.val() || 0;
+      });
+
+      this.isFirebaseReady = true;
+      console.log('✅ Firebase Realtime Database Connected successfully.');
+    } catch (err) {
+      console.warn('⚠️ Firebase initial connection warning, running in Resilient Hybrid Engine mode:', err.message);
+      this.isFirebaseReady = false;
+    }
+  }
+
+  getServerTime() {
+    return Date.now() + this.serverTimeOffset;
+  }
+
+  handleBroadcastMessage(msg) {
+    if (!msg || !msg.type) return;
+    const { sessionCode, data } = msg;
+    if (this.listeners.has(sessionCode)) {
+      const callbacks = this.listeners.get(sessionCode);
+      callbacks.forEach((cb) => cb(data));
+    }
+  }
+
+  notifySessionUpdate(sessionCode, sessionData) {
+    // Notify in-process listeners
+    if (this.listeners.has(sessionCode)) {
+      this.listeners.get(sessionCode).forEach((cb) => cb(sessionData));
+    }
+    // Broadcast to other tabs/windows
+    if (this.broadcast) {
+      this.broadcast.postMessage({
+        type: 'SESSION_UPDATE',
+        sessionCode,
+        data: sessionData
+      });
+    }
+    // Persist in localStorage for refresh resilience
+    try {
+      localStorage.setItem(`tc_session_${sessionCode}`, JSON.stringify(sessionData));
+    } catch (e) {}
+  }
+
+  getLocalSession(sessionCode) {
+    try {
+      const raw = localStorage.getItem(`tc_session_${sessionCode}`);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * CREATE A NEW GAME SESSION
+   */
+  async createSession(title = 'Sesi Pembelajaran Kalor SMP') {
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let code = 'TC';
+    for (let i = 0; i < 4; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+
+    const sessionData = {
+      code,
+      title,
+      createdAt: this.getServerTime(),
+      status: 'LOBBY',
+      currentPhase: 'LOBBY',
+      phaseStartTime: null,
+      phaseDuration: 0,
+      teams: {},
+      settings: {
+        game1MemorizeTime: 35,
+        game1PlayTime: 75,
+        game2WordTime: 20,
+        game3TotalTime: 120,
+        maxTeams: 8
+      }
+    };
+
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const sRef = this.fbRef(this.db, `sessions/${code}`);
+        await this.fbSet(sRef, sessionData);
+      } catch (e) {
+        console.warn('Firebase set error, storing locally:', e);
+      }
+    }
+
+    this.notifySessionUpdate(code, sessionData);
+    return sessionData;
+  }
+
+  /**
+   * JOIN SESSION & REGISTER TEAM (1 to 8)
+   */
+  async joinSession(sessionCode, teamNumber, teamName, members) {
+    const num = parseInt(teamNumber, 10);
+    if (isNaN(num) || num < 1 || num > 8) {
+      throw new Error('Nomor kelompok harus berada di antara 1 sampai 8.');
+    }
+
+    let session = await this.getSession(sessionCode);
+    if (!session) {
+      throw new Error(`Sesi dengan kode ${sessionCode} tidak ditemukan.`);
+    }
+
+    if (session.status !== 'LOBBY') {
+      throw new Error('Permainan sudah dimulai atau telah berakhir.');
+    }
+
+    if (session.teams && session.teams[`team_${num}`] && session.teams[`team_${num}`].claimed) {
+      // Check if it's the same device rejoining
+      const mySaved = this.getStoredTeamSession();
+      if (!mySaved || mySaved.teamNumber !== num || mySaved.sessionCode !== sessionCode) {
+        throw new Error(`Kelompok ${num} sudah diambil oleh perangkat lain.`);
+      }
+    }
+
+    const teamData = {
+      number: num,
+      name: (teamName || `Kelompok ${num}`).trim(),
+      members: Array.isArray(members) ? members : [],
+      claimed: true,
+      ready: true,
+      joinedAt: this.getServerTime(),
+      scores: {
+        game1: 0,
+        game2: 0,
+        game3: 0,
+        total: 0
+      },
+      progress: {
+        game1Submitted: false,
+        game2Index: 0,
+        game3Index: 0
+      },
+      predicate: 'Temperature Rookie'
+    };
+
+    if (!session.teams) session.teams = {};
+    session.teams[`team_${num}`] = teamData;
+
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const teamRef = this.fbRef(this.db, `sessions/${sessionCode}/teams/team_${num}`);
+        await this.fbSet(teamRef, teamData);
+      } catch (e) {
+        console.warn('Firebase join error, fallback to local:', e);
+      }
+    }
+
+    this.notifySessionUpdate(sessionCode, session);
+
+    // Save credentials in client local storage
+    this.saveTeamSession(sessionCode, num, teamName);
+
+    return { success: true, teamNumber: num, sessionCode };
+  }
+
+  /**
+   * SET SESSION PHASE (ADMIN CONTROL)
+   * Phases: 'LOBBY' | 'GAME1_MEMORIZE' | 'GAME1_PLAY' | 'GAME2' | 'GAME3' | 'FINISHED'
+   */
+  async setSessionPhase(sessionCode, phase) {
+    let session = await this.getSession(sessionCode);
+    if (!session) throw new Error('Sesi tidak ditemukan.');
+
+    let duration = 0;
+    if (phase === 'GAME1_MEMORIZE') duration = session.settings?.game1MemorizeTime || 35;
+    else if (phase === 'GAME1_PLAY') duration = session.settings?.game1PlayTime || 75;
+    else if (phase === 'GAME2') duration = (session.settings?.game2WordTime || 20) * 10;
+    else if (phase === 'GAME3') duration = session.settings?.game3TotalTime || 120;
+    else if (phase === 'FINISHED') duration = 0;
+
+    session.status = phase;
+    session.currentPhase = phase;
+    session.phaseStartTime = this.getServerTime();
+    session.phaseDuration = duration;
+
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const sessionRef = this.fbRef(this.db, `sessions/${sessionCode}`);
+        await this.fbUpdate(sessionRef, {
+          status: phase,
+          currentPhase: phase,
+          phaseStartTime: session.phaseStartTime,
+          phaseDuration: duration
+        });
+      } catch (e) {
+        console.warn('Firebase setPhase error:', e);
+      }
+    }
+
+    this.notifySessionUpdate(sessionCode, session);
+    return session;
+  }
+
+  /**
+   * SUBMIT GAME 1 (Shuffle & Recall)
+   */
+  async submitGame1(sessionCode, teamNumber, userAnswers) {
+    const session = await this.getSession(sessionCode);
+    if (!session || !session.teams || !session.teams[`team_${teamNumber}`]) {
+      throw new Error('Data kelompok tidak ditemukan.');
+    }
+
+    const team = session.teams[`team_${teamNumber}`];
+    if (team.progress?.game1Submitted) {
+      return { success: false, message: 'Game 1 sudah dikirim sebelumnya.' };
+    }
+
+    // Evaluate answers
+    let correctCount = 0;
+    for (const challenge of SHUFFLE_CHALLENGES) {
+      const ans = (userAnswers[challenge.id] || '').trim();
+      if (ans.toLowerCase() === challenge.correctAnswer.toLowerCase()) {
+        correctCount++;
+      }
+    }
+
+    // Base score: 2.5 pts each (max 25 pts)
+    let score = correctCount * 2.5;
+    if (correctCount === SHUFFLE_CHALLENGES.length) {
+      score += 5; // Perfect 10/10 bonus 5 pts -> Total 30
+    }
+    score = Math.min(30, Math.round(score * 10) / 10);
+
+    team.scores.game1 = score;
+    team.scores.total = Math.min(100, Math.round((team.scores.game1 + (team.scores.game2 || 0) + (team.scores.game3 || 0)) * 10) / 10);
+    team.predicate = getPredicate(team.scores.total).title;
+    team.progress.game1Submitted = true;
+
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const teamRef = this.fbRef(this.db, `sessions/${sessionCode}/teams/team_${teamNumber}`);
+        await this.fbUpdate(teamRef, {
+          'scores/game1': score,
+          'scores/total': team.scores.total,
+          'progress/game1Submitted': true,
+          predicate: team.predicate
+        });
+      } catch (e) {}
+    }
+
+    this.notifySessionUpdate(sessionCode, session);
+    return {
+      success: true,
+      score,
+      correctCount,
+      totalItems: SHUFFLE_CHALLENGES.length,
+      isPerfect: correctCount === SHUFFLE_CHALLENGES.length
+    };
+  }
+
+  /**
+   * SUBMIT GAME 2 SINGLE WORD
+   */
+  async submitGame2Word(sessionCode, teamNumber, itemId, answer, remainingSec = 0) {
+    const session = await this.getSession(sessionCode);
+    if (!session || !session.teams || !session.teams[`team_${teamNumber}`]) {
+      throw new Error('Data kelompok tidak ditemukan.');
+    }
+
+    const team = session.teams[`team_${teamNumber}`];
+    const item = WORD_SCRAMBLE_ITEMS.find((w) => w.id === itemId);
+    if (!item) return { correct: false, score: 0 };
+
+    const cleanUser = (answer || '').replace(/\s+/g, '').toUpperCase();
+    const cleanTarget = item.answer.replace(/\s+/g, '').toUpperCase();
+    const isCorrect = cleanUser === cleanTarget;
+
+    let addedScore = 0;
+    if (isCorrect) {
+      addedScore = item.points || 3.0;
+      if (remainingSec > 0) {
+        const fraction = Math.min(1, Math.max(0, remainingSec / (item.timeLimit || 20)));
+        addedScore += fraction * 0.5; // Up to 0.5 bonus
+      }
+      addedScore = Math.round(addedScore * 10) / 10;
+    }
+
+    const currentG2 = team.scores?.game2 || 0;
+    const newG2 = Math.min(35, Math.round((currentG2 + addedScore) * 10) / 10);
+
+    team.scores.game2 = newG2;
+    team.scores.total = Math.min(100, Math.round(((team.scores.game1 || 0) + newG2 + (team.scores.game3 || 0)) * 10) / 10);
+    team.predicate = getPredicate(team.scores.total).title;
+
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const teamRef = this.fbRef(this.db, `sessions/${sessionCode}/teams/team_${teamNumber}`);
+        await this.fbUpdate(teamRef, {
+          'scores/game2': newG2,
+          'scores/total': team.scores.total,
+          predicate: team.predicate
+        });
+      } catch (e) {}
+    }
+
+    this.notifySessionUpdate(sessionCode, session);
+    return {
+      success: true,
+      correct: isCorrect,
+      addedScore,
+      totalGame2Score: newG2,
+      expected: item.answer
+    };
+  }
+
+  /**
+   * SUBMIT GAME 3 CALCULATION
+   */
+  async submitGame3Calculation(sessionCode, teamNumber, itemId, rawAnswer, remainingSec = 0) {
+    const session = await this.getSession(sessionCode);
+    if (!session || !session.teams || !session.teams[`team_${teamNumber}`]) {
+      throw new Error('Data kelompok tidak ditemukan.');
+    }
+
+    const team = session.teams[`team_${teamNumber}`];
+    const item = HEAT_CALCULATION_ITEMS.find((h) => h.id === itemId);
+    if (!item) return { correct: false, score: 0 };
+
+    // Format parse
+    let clean = String(rawAnswer || '').trim().replace(/\s+/g, '');
+    if (/^\d{1,3}(\.\d{3})+$/.test(clean)) {
+      clean = clean.replace(/\./g, '');
+    } else if (/^\d+,\d+$/.test(clean)) {
+      clean = clean.replace(',', '.');
+    } else {
+      clean = clean.replace(/,/g, '');
+    }
+
+    const num = parseFloat(clean);
+    const expected = item.correctAnswer;
+    const tolerance = item.tolerance || 0.01;
+    const isCorrect = !isNaN(num) && Math.abs(num - expected) <= Math.max(0.001, expected * tolerance);
+
+    let addedScore = 0;
+    if (isCorrect) {
+      addedScore = item.points || 3.5;
+      if (remainingSec > 0) {
+        const fraction = Math.min(1, Math.max(0, remainingSec / 120));
+        addedScore += fraction * 0.5;
+      }
+      addedScore = Math.round(addedScore * 10) / 10;
+    }
+
+    const currentG3 = team.scores?.game3 || 0;
+    const newG3 = Math.min(35, Math.round((currentG3 + addedScore) * 10) / 10);
+
+    team.scores.game3 = newG3;
+    team.scores.total = Math.min(100, Math.round(((team.scores.game1 || 0) + (team.scores.game2 || 0) + newG3) * 10) / 10);
+    team.predicate = getPredicate(team.scores.total).title;
+
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const teamRef = this.fbRef(this.db, `sessions/${sessionCode}/teams/team_${teamNumber}`);
+        await this.fbUpdate(teamRef, {
+          'scores/game3': newG3,
+          'scores/total': team.scores.total,
+          predicate: team.predicate
+        });
+      } catch (e) {}
+    }
+
+    this.notifySessionUpdate(sessionCode, session);
+    return {
+      success: true,
+      correct: isCorrect,
+      addedScore,
+      totalGame3Score: newG3,
+      expected: item.correctAnswer,
+      explanation: item.explanation
+    };
+  }
+
+  /**
+   * RESET SESSION (FOR NEW MATCH)
+   */
+  async resetSession(sessionCode) {
+    const session = await this.getSession(sessionCode);
+    if (!session) return;
+
+    session.status = 'LOBBY';
+    session.currentPhase = 'LOBBY';
+    session.phaseStartTime = null;
+    session.phaseDuration = 0;
+    if (session.teams) {
+      Object.keys(session.teams).forEach((k) => {
+        session.teams[k].scores = { game1: 0, game2: 0, game3: 0, total: 0 };
+        session.teams[k].progress = { game1Submitted: false, game2Index: 0, game3Index: 0 };
+        session.teams[k].predicate = 'Temperature Rookie';
+      });
+    }
+
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const sessionRef = this.fbRef(this.db, `sessions/${sessionCode}`);
+        await this.fbSet(sessionRef, session);
+      } catch (e) {}
+    }
+
+    this.notifySessionUpdate(sessionCode, session);
+    return session;
+  }
+
+  /**
+   * LISTEN TO SESSION CHANGES IN REALTIME
+   */
+  listenToSession(sessionCode, callback) {
+    if (!this.listeners.has(sessionCode)) {
+      this.listeners.set(sessionCode, new Set());
+    }
+    this.listeners.get(sessionCode).add(callback);
+
+    // Initial load
+    this.getSession(sessionCode).then((s) => {
+      if (s) callback(s);
+    });
+
+    // Firebase live listener
+    if (this.isFirebaseReady && this.db) {
+      const sRef = this.fbRef(this.db, `sessions/${sessionCode}`);
+      this.fbOnValue(sRef, (snap) => {
+        const val = snap.val();
+        if (val) {
+          this.notifySessionUpdate(sessionCode, val);
+        }
+      });
+    }
+
+    // Storage event for multi-tab
+    window.addEventListener('storage', (e) => {
+      if (e.key === `tc_session_${sessionCode}` && e.newValue) {
+        try {
+          const val = JSON.parse(e.newValue);
+          callback(val);
+        } catch (err) {}
+      }
+    });
+
+    return () => {
+      if (this.listeners.has(sessionCode)) {
+        this.listeners.get(sessionCode).delete(callback);
+      }
+    };
+  }
+
+  async getSession(sessionCode) {
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const sRef = this.fbRef(this.db, `sessions/${sessionCode}`);
+        const snap = await this.fbGet(sRef);
+        if (snap.exists()) {
+          const val = snap.val();
+          try {
+            localStorage.setItem(`tc_session_${sessionCode}`, JSON.stringify(val));
+          } catch (e) {}
+          return val;
+        }
+      } catch (e) {
+        console.warn('Firebase getSession error:', e);
+      }
+    }
+    return this.getLocalSession(sessionCode);
+  }
+
+  saveTeamSession(sessionCode, teamNumber, teamName) {
+    const cred = { sessionCode, teamNumber, teamName, savedAt: Date.now() };
+    localStorage.setItem('tc_team_session', JSON.stringify(cred));
+  }
+
+  getStoredTeamSession() {
+    try {
+      const raw = localStorage.getItem('tc_team_session');
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  clearStoredTeamSession() {
+    localStorage.removeItem('tc_team_session');
+  }
+}
+
+export const firebaseService = new FirebaseService();
