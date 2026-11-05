@@ -121,10 +121,14 @@ export function renderHomeView(container, { onJoinTeam, onOpenAdmin }) {
   formJoin.addEventListener('submit', (e) => {
     e.preventDefault();
     audio.playClick();
-    const code = container.querySelector('#input-session-code').value.trim().toUpperCase();
+    let code = container.querySelector('#input-session-code').value.trim().toUpperCase();
     if (!code) {
       toast.error('Masukkan kode sesi terlebih dahulu.');
       return;
+    }
+    // Auto-normalize 4-digit code if user omitted TC prefix
+    if (!code.startsWith('TC') && code.length === 4) {
+      code = 'TC' + code;
     }
     if (onJoinTeam) onJoinTeam(code);
   });

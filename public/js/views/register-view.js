@@ -8,10 +8,26 @@ import { audio } from '../services/audio-service.js';
 import { toast } from '../components/notification.js';
 
 export async function renderRegisterView(container, { sessionCode, onRegistered, onBack }) {
-  // Fetch session to check which team numbers are already claimed
+  // Show pleasant loading state while connecting to cloud session
+  container.innerHTML = `
+    <div class="tc-view tc-register-view">
+      <div class="tc-card" style="text-align: center; max-width: 480px; margin: 4rem auto; padding: 2.5rem 1.5rem;">
+        <div class="tc-radar-spinner" style="margin: 0 auto 1.5rem auto; width: 42px; height: 42px;"></div>
+        <h3 style="font-size: 1.3rem; margin-bottom: 0.4rem;">Menghubungkan ke Sesi ${sessionCode}...</h3>
+        <p style="color: #94a3b8; font-size: 0.88rem;">Menyinkronkan data ruangan kelas dari server online...</p>
+      </div>
+    </div>
+  `;
+
+  // Fetch session with retry for mobile networks
   let session = await firebaseService.getSession(sessionCode);
   if (!session) {
-    toast.error(`Sesi ${sessionCode} tidak ditemukan.`);
+    await new Promise((r) => setTimeout(r, 1000));
+    session = await firebaseService.getSession(sessionCode);
+  }
+
+  if (!session) {
+    toast.error(`Sesi ${sessionCode} belum ditemukan. Pastikan Guru telah membuat sesi.`);
     if (onBack) onBack();
     return;
   }
