@@ -7,7 +7,7 @@ import { firebaseService } from '../services/firebase-service.js';
 import { audio } from '../services/audio-service.js';
 import { toast } from '../components/notification.js';
 import { exportSessionToCSV } from '../services/export-service.js';
-import { ADMIN_CREDENTIALS } from '../config/firebase-config.js';
+import { firebaseConfig, ADMIN_CREDENTIALS } from '../config/firebase-config.js';
 
 export function renderAdminView(container, { onExit }) {
   let activeSessionCode = null;
@@ -92,6 +92,7 @@ export function renderAdminView(container, { onExit }) {
             </div>
             <div class="tc-code-btn-group">
               <button id="btn-copy-code" class="tc-btn tc-btn-sm tc-btn-outline" title="Salin Kode">📋 Salin</button>
+              <button id="btn-copy-link" class="tc-btn tc-btn-sm tc-btn-secondary" title="Salin Link HP Siswa">🔗 Salin Link HP</button>
               <button id="btn-create-new-session" class="tc-btn tc-btn-sm tc-btn-primary">+ Sesi Baru</button>
             </div>
           </div>
@@ -190,6 +191,7 @@ export function renderAdminView(container, { onExit }) {
     // Hook buttons
     const btnCreateSession = dashEl.querySelector('#btn-create-new-session');
     const btnCopyCode = dashEl.querySelector('#btn-copy-code');
+    const btnCopyLink = dashEl.querySelector('#btn-copy-link');
     const btnExportCSV = dashEl.querySelector('#btn-export-csv');
     const btnSimulate = dashEl.querySelector('#btn-simulate-teams');
     const btnReset = dashEl.querySelector('#btn-reset-session');
@@ -222,6 +224,27 @@ export function renderAdminView(container, { onExit }) {
         toast.info(`Kode Sesi: ${activeSessionCode}`);
       });
     });
+
+    // Copy Direct Student Link
+    if (btnCopyLink) {
+      btnCopyLink.addEventListener('click', () => {
+        audio.playClick();
+        if (!activeSessionCode) {
+          toast.warning('Buat sesi terlebih dahulu.');
+          return;
+        }
+        const studentUrl = new URL(window.location.origin + window.location.pathname);
+        studentUrl.searchParams.set('session', activeSessionCode);
+        if (firebaseConfig && firebaseConfig.databaseURL) {
+          studentUrl.searchParams.set('db', firebaseConfig.databaseURL);
+        }
+        navigator.clipboard.writeText(studentUrl.toString()).then(() => {
+          toast.success('Link HP Siswa disalin! Bagikan ke grup WhatsApp/kelas.');
+        }).catch(() => {
+          toast.info(studentUrl.toString());
+        });
+      });
+    }
 
     // Phase Switch Buttons
     const phaseButtons = dashEl.querySelectorAll('.tc-btn-phase');

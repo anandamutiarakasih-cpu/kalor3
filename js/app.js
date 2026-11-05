@@ -39,7 +39,22 @@ class ThermoChampionsApp {
       this.state.teamNumber = stored.teamNumber;
       this.reconnectSession(stored.sessionCode, stored.teamNumber);
     } else {
-      this.navigate('home');
+      // Check if session code was passed in URL (e.g. ?session=TC1234)
+      let urlCode = null;
+      try {
+        if (typeof window !== 'undefined' && window.location && window.location.search) {
+          const urlParams = new URLSearchParams(window.location.search);
+          const rawCode = urlParams.get('session');
+          if (rawCode) urlCode = rawCode.trim().toUpperCase();
+        }
+      } catch (e) {}
+
+      if (urlCode) {
+        this.state.sessionCode = urlCode;
+        this.navigate('register', { sessionCode: urlCode });
+      } else {
+        this.navigate('home');
+      }
     }
   }
 

@@ -5,28 +5,7 @@
     "sessions": {
       "$sessionId": {
         ".read": true,
-        ".write": "auth != null && auth.token.admin == true",
-        "teams": {
-          "$teamId": {
-            ".read": true,
-            ".write": "auth != null",
-            "scores": {
-              ".write": "auth != null && auth.token.admin == true"
-            },
-            "predicate": {
-              ".write": "auth != null && auth.token.admin == true"
-            }
-          }
-        },
-        "status": {
-          ".write": "auth != null && auth.token.admin == true"
-        },
-        "currentPhase": {
-          ".write": "auth != null && auth.token.admin == true"
-        },
-        "phaseStartTime": {
-          ".write": "auth != null && auth.token.admin == true"
-        }
+        ".write": true
       }
     }
   }

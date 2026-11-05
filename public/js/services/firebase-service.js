@@ -47,7 +47,7 @@ class FirebaseService {
       const { getAuth, signInAnonymously } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js');
 
       this.app = initializeApp(firebaseConfig);
-      this.db = getDatabase(this.app);
+      this.db = firebaseConfig.databaseURL ? getDatabase(this.app, firebaseConfig.databaseURL) : getDatabase(this.app);
       this.auth = getAuth(this.app);
       this.fbRef = ref;
       this.fbOnValue = onValue;
@@ -55,7 +55,11 @@ class FirebaseService {
       this.fbUpdate = update;
       this.fbGet = get;
 
-      await signInAnonymously(this.auth);
+      try {
+        await signInAnonymously(this.auth);
+      } catch (authErr) {
+        console.warn('⚠️ Anonymous Auth note:', authErr.message);
+      }
 
       // Listen for server time offset
       const offsetRef = ref(this.db, '.info/serverTimeOffset');
@@ -63,8 +67,16 @@ class FirebaseService {
         this.serverTimeOffset = snap.val() || 0;
       });
 
+      // Listen for connection status
+      const connRef = ref(this.db, '.info/connected');
+      onValue(connRef, (snap) => {
+        const val = snap.val();
+        this.isOnline = !!val;
+        console.log(val ? '🟢 Firebase RTDB Online' : '🟠 Firebase RTDB Offline/Connecting');
+      });
+
       this.isFirebaseReady = true;
-      console.log('✅ Firebase Realtime Database Connected.');
+      console.log('✅ Firebase Realtime Database Initialized.');
     } catch (err) {
       console.warn('⚠️ Firebase initial connection note (falling back to Global Cloud Relay):', err.message);
       this.isFirebaseReady = false;
