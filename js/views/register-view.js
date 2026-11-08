@@ -191,7 +191,9 @@ export async function renderRegisterView(container, { sessionCode, onRegistered,
   // Back button
   btnBack.addEventListener('click', () => {
     audio.playClick();
-    if (onBack) onBack();
+    if (confirm('Kembali ke menu awal? Pilihan kelompok dan nama anggota akan dibatalkan.')) {
+      if (onBack) onBack();
+    }
   });
 
   // Form Submit

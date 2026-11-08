@@ -54,6 +54,13 @@ export class SyncTimer {
     this.barEl.style.strokeDashoffset = '0';
   }
 
+  setContainer(newContainer) {
+    if (!newContainer) return;
+    this.container = newContainer;
+    this.render();
+    this.update();
+  }
+
   start() {
     this.update();
     this.timerId = setInterval(() => this.update(), 100);
@@ -92,13 +99,6 @@ export class SyncTimer {
         this.onComplete();
       }
     }
-  }
-
-  rebindContainer(newContainer) {
-    if (!newContainer) return;
-    this.container = newContainer;
-    this.render();
-    this.update();
   }
 
   getRemainingSeconds() {

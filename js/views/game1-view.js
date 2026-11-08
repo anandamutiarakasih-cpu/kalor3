@@ -193,8 +193,7 @@ export function renderGame1View(container, { sessionCode, teamNumber, isMemorize
 
       const card = optBtn.closest('.tc-challenge-card');
       const qId = card.dataset.id;
-      const textSpan = optBtn.querySelector('.tc-opt-text');
-      const val = textSpan ? textSpan.textContent.trim() : (optBtn.dataset.val || '');
+      const val = optBtn.dataset.val;
 
       // Deselect siblings
       card.querySelectorAll('.tc-opt-btn').forEach((b) => b.classList.remove('selected'));

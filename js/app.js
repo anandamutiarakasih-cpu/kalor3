@@ -27,59 +27,81 @@ class ThermoChampionsApp {
     };
   }
 
-  setupRefreshWarning() {
-    window.addEventListener('beforeunload', (e) => {
-      // Peringatan saat user sedang berada dalam sesi atau permainan
-      if (this.state.sessionCode || (this.currentRoute && this.currentRoute !== 'home')) {
-        e.preventDefault();
-        const msg = 'Peringatan: Jika halaman di-refresh, progres data permainan akan di-reset dan kembali ke menu awal. Yakin ingin me-refresh?';
-        e.returnValue = msg;
-        return msg;
-      }
-    });
-  }
-
   init() {
     // Start Thermal Energy Ambient Particles
     if (this.canvas) {
       particleService.init(this.canvas);
     }
 
-    this.setupRefreshWarning();
+    // Confirmation warning on refresh or leaving while inside active session
+    window.addEventListener('beforeunload', (e) => {
+      if (this.currentRoute && this.currentRoute !== 'home') {
+        e.preventDefault();
+        const msg = 'Data permainan akan di-reset dan Anda akan kembali ke menu awal jika halaman dimuat ulang.';
+        e.returnValue = msg;
+        return msg;
+      }
+    });
 
-    // Cek apakah halaman dibuka akibat tindakan refresh/reload browser
-    const navEntries = typeof performance !== 'undefined' && performance.getEntriesByType ? performance.getEntriesByType('navigation') : [];
-    const isReload = (navEntries && navEntries[0] && navEntries[0].type === 'reload') ||
-                     (typeof performance !== 'undefined' && performance.navigation && performance.navigation.type === 1);
-
-    if (isReload) {
-      // Jika di-refresh: reset data dan kembali ke menu awal
+    // Detect if page was refreshed/reloaded
+    const isReloaded = this.detectReload();
+    if (isReloaded) {
+      // Clear stored session and reset state as requested
       firebaseService.clearStoredTeamSession();
       this.state.sessionCode = null;
       this.state.teamNumber = null;
+
+      // Clean query string from URL so it doesn't auto-redirect
+      try {
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      } catch (e) {}
+
       this.navigate('home');
       setTimeout(() => {
-        toast.warning('Halaman telah di-refresh. Progres permainan Anda telah di-reset kembali ke menu awal.');
-      }, 500);
+        toast.warning('Halaman dimuat ulang: Data sesi telah di-reset dan kembali ke menu awal.');
+      }, 400);
       return;
     }
 
-    // Normal visit: check if session code was passed in URL (e.g. ?session=TC1234)
-    let urlCode = null;
+    // Normal non-reload entry: Check for existing saved team session
+    const stored = firebaseService.getStoredTeamSession();
+    if (stored && stored.sessionCode && stored.teamNumber) {
+      this.state.sessionCode = stored.sessionCode;
+      this.state.teamNumber = stored.teamNumber;
+      this.reconnectSession(stored.sessionCode, stored.teamNumber);
+    } else {
+      // Check if session code was passed in URL (e.g. ?session=TC1234)
+      let urlCode = null;
+      try {
+        if (typeof window !== 'undefined' && window.location && window.location.search) {
+          const urlParams = new URLSearchParams(window.location.search);
+          const rawCode = urlParams.get('session');
+          if (rawCode) urlCode = rawCode.trim().toUpperCase();
+        }
+      } catch (e) {}
+
+      if (urlCode) {
+        this.state.sessionCode = urlCode;
+        this.navigate('register', { sessionCode: urlCode });
+      } else {
+        this.navigate('home');
+      }
+    }
+  }
+
+  detectReload() {
     try {
-      if (typeof window !== 'undefined' && window.location && window.location.search) {
-        const urlParams = new URLSearchParams(window.location.search);
-        const rawCode = urlParams.get('session');
-        if (rawCode) urlCode = rawCode.trim().toUpperCase();
+      const navEntries = performance.getEntriesByType('navigation');
+      if (navEntries && navEntries.length > 0) {
+        return navEntries[0].type === 'reload';
+      }
+      if (window.performance && window.performance.navigation) {
+        return window.performance.navigation.type === 1;
       }
     } catch (e) {}
-
-    if (urlCode) {
-      this.state.sessionCode = urlCode;
-      this.navigate('register', { sessionCode: urlCode });
-    } else {
-      this.navigate('home');
-    }
+    return false;
   }
 
   async reconnectSession(sessionCode, teamNumber) {

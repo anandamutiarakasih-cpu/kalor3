@@ -54,8 +54,10 @@ export function renderAdminView(container, { onExit }) {
   const btnExit = container.querySelector('#btn-admin-exit');
   btnExit.addEventListener('click', () => {
     audio.playClick();
-    if (unsubscribe) unsubscribe();
-    if (onExit) onExit();
+    if (confirm('Keluar dari Pusat Kendali Guru dan kembali ke menu utama?')) {
+      if (unsubscribe) unsubscribe();
+      if (onExit) onExit();
+    }
   });
 
   const formLogin = container.querySelector('#form-admin-login');

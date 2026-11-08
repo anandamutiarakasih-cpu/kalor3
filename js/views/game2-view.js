@@ -13,11 +13,11 @@ export function renderGame2View(container, { sessionCode, teamNumber, onGameComp
   let currentIndex = 0;
   let timerInstance = null;
   let sessionUnsubscribe = null;
+  let currentKeyHandler = null;
   let currentWordScore = 0;
   let totalScoreG2 = 0;
   let selectedTiles = []; // indices of scrambled letters placed in answer slot
   let isAnswering = false;
-  let activeKeyHandler = null;
 
   // Realtime Session listener to detect phase change from Admin
   sessionUnsubscribe = firebaseService.listenToSession(sessionCode, (session) => {
@@ -193,11 +193,6 @@ export function renderGame2View(container, { sessionCode, teamNumber, onGameComp
     });
 
     // Physical Keyboard Input
-    if (activeKeyHandler) {
-      window.removeEventListener('keydown', activeKeyHandler);
-      activeKeyHandler = null;
-    }
-
     const keyHandler = (e) => {
       if (isAnswering) return;
       if (e.key === 'Backspace') {
@@ -215,8 +210,11 @@ export function renderGame2View(container, { sessionCode, teamNumber, onGameComp
         }
       }
     };
-    activeKeyHandler = keyHandler;
-    window.addEventListener('keydown', activeKeyHandler);
+    if (currentKeyHandler) {
+      window.removeEventListener('keydown', currentKeyHandler);
+    }
+    currentKeyHandler = keyHandler;
+    window.addEventListener('keydown', keyHandler);
 
     // Update Answer Slots display
     function updateSlots() {
@@ -247,10 +245,7 @@ export function renderGame2View(container, { sessionCode, teamNumber, onGameComp
     async function submitCurrentWord(isTimeout = false) {
       if (isAnswering) return;
       isAnswering = true;
-      if (activeKeyHandler) {
-        window.removeEventListener('keydown', activeKeyHandler);
-        activeKeyHandler = null;
-      }
+      window.removeEventListener('keydown', keyHandler);
       if (timerInstance) timerInstance.stop();
 
       const remainingSec = timerInstance ? timerInstance.getRemainingSeconds() : 0;
@@ -327,12 +322,12 @@ export function renderGame2View(container, { sessionCode, teamNumber, onGameComp
   }
 
   function cleanup() {
+    if (currentKeyHandler) {
+      window.removeEventListener('keydown', currentKeyHandler);
+      currentKeyHandler = null;
+    }
     if (timerInstance) timerInstance.destroy();
     if (sessionUnsubscribe) sessionUnsubscribe();
-    if (activeKeyHandler) {
-      window.removeEventListener('keydown', activeKeyHandler);
-      activeKeyHandler = null;
-    }
   }
 
   return {

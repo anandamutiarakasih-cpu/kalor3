@@ -243,7 +243,7 @@ export const WORD_SCRAMBLE_ITEMS = [
   {
     id: 'ws4',
     difficulty: 'MEDIUM',
-    scrambled: 'D U K S I K O N',
+    scrambled: 'D U K S N I K O N',
     answer: 'KONDUKSI',
     clue: 'Perpindahan kalor pada zat padat tanpa pergerakan partikel (8 huruf)',
     category: 'Perpindahan Kalor',
@@ -253,7 +253,7 @@ export const WORD_SCRAMBLE_ITEMS = [
   {
     id: 'ws5',
     difficulty: 'MEDIUM',
-    scrambled: 'V E K S I K O N',
+    scrambled: 'V E K S N I K O N',
     answer: 'KONVEKSI',
     clue: 'Perpindahan panas disertai aliran partikel zat cair atau gas (8 huruf)',
     category: 'Perpindahan Kalor',
