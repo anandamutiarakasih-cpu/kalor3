@@ -2,11 +2,13 @@
  * THERMO CHAMPIONS: HEAT EDITION
  * Firebase Service & Realtime Synchronization Engine
  * Dual-Sync: Firebase RTDB + Global Cloud Relay (SSE/REST) + BroadcastChannel
+ * Ultra-Responsive Zero-Lag Architecture
  */
 
 import { firebaseConfig } from '../config/firebase-config.js';
 import { getPredicate } from '../data/predicates.js';
 import {
+  CLASH_SHUFFLE_CARDS,
   SHUFFLE_CHALLENGES,
   WORD_SCRAMBLE_ITEMS,
   HEAT_CALCULATION_ITEMS
@@ -21,7 +23,8 @@ class FirebaseService {
     this.serverTimeOffset = 0;
     this.broadcast = null;
     this.listeners = new Map();
-    this.activeSSE = new Map(); // sessionCode -> cleanup fn
+    this.activeSSE = new Map();
+    this.sessionCache = new Map();
 
     this.initBroadcastChannel();
     this.initFirebase();
@@ -58,7 +61,7 @@ class FirebaseService {
       try {
         await signInAnonymously(this.auth);
       } catch (authErr) {
-        console.info('ℹ️ Note: Firebase Anonymous Auth belum diaktifkan di console. Sinkronisasi sesi tetap berjalan normal via realtime rules.');
+        console.info('ℹ️ Note: Firebase Auth fallback active. Sinkronisasi berjalan via realtime cloud relay.');
       }
 
       // Listen for server time offset
@@ -76,9 +79,9 @@ class FirebaseService {
       });
 
       this.isFirebaseReady = true;
-      console.log('✅ Firebase Realtime Database Initialized.');
+      console.log('✅ Firebase Realtime Engine Ready.');
     } catch (err) {
-      console.warn('⚠️ Firebase initial connection note (falling back to Global Cloud Relay):', err.message);
+      console.warn('⚠️ Firebase initial connection note (running on Global Cloud Relay):', err.message);
       this.isFirebaseReady = false;
     }
   }
@@ -90,28 +93,38 @@ class FirebaseService {
   handleBroadcastMessage(msg) {
     if (!msg || !msg.type) return;
     const { sessionCode, data } = msg;
-    if (this.listeners.has(sessionCode)) {
-      const callbacks = this.listeners.get(sessionCode);
-      callbacks.forEach((cb) => cb(data));
+    if (sessionCode && data) {
+      this.sessionCache.set(sessionCode, data);
+      if (this.listeners.has(sessionCode)) {
+        this.listeners.get(sessionCode).forEach((cb) => cb(data));
+      }
     }
   }
 
   /**
    * NOTIFY SESSION UPDATE ACROSS ALL LAYERS
+   * Immediate synchronous dispatch (0ms latency for UI)
    */
   notifySessionUpdate(sessionCode, sessionData) {
-    // 1. In-process subscribers
+    if (!sessionCode || !sessionData) return;
+    this.sessionCache.set(sessionCode, sessionData);
+
+    // 1. In-process subscribers (Instant)
     if (this.listeners.has(sessionCode)) {
-      this.listeners.get(sessionCode).forEach((cb) => cb(sessionData));
+      this.listeners.get(sessionCode).forEach((cb) => {
+        try { cb(sessionData); } catch (e) { console.error(e); }
+      });
     }
 
     // 2. BroadcastChannel for same browser/tabs
     if (this.broadcast) {
-      this.broadcast.postMessage({
-        type: 'SESSION_UPDATE',
-        sessionCode,
-        data: sessionData
-      });
+      try {
+        this.broadcast.postMessage({
+          type: 'SESSION_UPDATE',
+          sessionCode,
+          data: sessionData
+        });
+      } catch (e) {}
     }
 
     // 3. LocalStorage persistence
@@ -119,8 +132,8 @@ class FirebaseService {
       localStorage.setItem(`tc_session_${sessionCode}`, JSON.stringify(sessionData));
     } catch (e) {}
 
-    // 4. Global Cloud Relay (Cross-Device Internet Relay)
-    this.publishToCloudRelay(sessionCode, sessionData);
+    // 4. Global Cloud Relay (Cross-Device Internet Relay - non-blocking background)
+    this.publishToCloudRelay(sessionCode, sessionData).catch(() => {});
   }
 
   getLocalSession(sessionCode) {
@@ -134,7 +147,7 @@ class FirebaseService {
 
   /**
    * GLOBAL CLOUD RELAY (ntfy.sh Server-Sent Events & REST)
-   * Ensures devices on different networks (WiFi, 4G, cellular) connect 100% reliably
+   * Ensures devices on different networks connect 100% reliably
    */
   async publishToCloudRelay(sessionCode, sessionData) {
     if (!sessionCode || !sessionData) return;
@@ -145,7 +158,7 @@ class FirebaseService {
         body: JSON.stringify(sessionData)
       });
     } catch (err) {
-      console.warn('Cloud relay publish error:', err.message);
+      // Cloud relay fallback
     }
   }
 
@@ -167,9 +180,7 @@ class FirebaseService {
           }
         } catch (e) {}
       }
-    } catch (err) {
-      console.warn('Cloud relay fetch error:', err.message);
-    }
+    } catch (err) {}
     return null;
   }
 
@@ -183,7 +194,7 @@ class FirebaseService {
           if (payload && payload.message) {
             const data = JSON.parse(payload.message);
             if (data && data.code === sessionCode) {
-              // Cache locally
+              this.sessionCache.set(sessionCode, data);
               try {
                 localStorage.setItem(`tc_session_${sessionCode}`, JSON.stringify(data));
               } catch (e) {}
@@ -196,7 +207,6 @@ class FirebaseService {
         eventSource.close();
       };
     } catch (err) {
-      console.warn('EventSource error:', err.message);
       return () => {};
     }
   }
@@ -221,26 +231,25 @@ class FirebaseService {
       phaseDuration: 0,
       teams: {},
       settings: {
-        game1MemorizeTime: 35,
-        game1PlayTime: 75,
+        game1MemorizeTime: 15, // 15 detik sesuai prompt Clash of Champions
+        game1PlayTime: 90,
         game2WordTime: 20,
         game3TotalTime: 120,
         maxTeams: 8
       }
     };
 
-    // Push to Firebase RTDB if available
+    // Broadcast across all layers immediately
+    this.notifySessionUpdate(code, sessionData);
+
+    // Push to Firebase RTDB in background without blocking
     if (this.isFirebaseReady && this.db) {
       try {
         const sRef = this.fbRef(this.db, `sessions/${code}`);
-        await this.fbSet(sRef, sessionData);
-      } catch (e) {
-        console.warn('Firebase set error:', e);
-      }
+        this.fbSet(sRef, sessionData).catch((e) => console.warn('Firebase set error:', e));
+      } catch (e) {}
     }
 
-    // Broadcast across all layers
-    this.notifySessionUpdate(code, sessionData);
     return sessionData;
   }
 
@@ -253,13 +262,20 @@ class FirebaseService {
       throw new Error('Nomor kelompok harus berada di antara 1 sampai 8.');
     }
 
-    let session = await this.getSession(sessionCode);
+    let session = this.sessionCache.get(sessionCode) || this.getLocalSession(sessionCode);
+    if (!session) {
+      session = await this.getSession(sessionCode);
+    }
     if (!session) {
       throw new Error(`Sesi dengan kode ${sessionCode} tidak ditemukan.`);
     }
 
     if (session.status !== 'LOBBY') {
-      throw new Error('Permainan sudah dimulai atau telah berakhir.');
+      // Allow joining if team already belongs to this device
+      const mySaved = this.getStoredTeamSession();
+      if (!mySaved || mySaved.teamNumber !== num || mySaved.sessionCode !== sessionCode) {
+        throw new Error('Permainan sudah dimulai atau telah berakhir.');
+      }
     }
 
     if (session.teams && session.teams[`team_${num}`] && session.teams[`team_${num}`].claimed) {
@@ -293,31 +309,35 @@ class FirebaseService {
     if (!session.teams) session.teams = {};
     session.teams[`team_${num}`] = teamData;
 
+    // Synchronous immediate dispatch
+    this.notifySessionUpdate(sessionCode, session);
+    this.saveTeamSession(sessionCode, num, teamName);
+
+    // Non-blocking Firebase write
     if (this.isFirebaseReady && this.db) {
       try {
         const teamRef = this.fbRef(this.db, `sessions/${sessionCode}/teams/team_${num}`);
-        await this.fbSet(teamRef, teamData);
-      } catch (e) {
-        console.warn('Firebase join error:', e);
-      }
+        this.fbSet(teamRef, teamData).catch((e) => console.warn('Firebase join error:', e));
+      } catch (e) {}
     }
-
-    this.notifySessionUpdate(sessionCode, session);
-    this.saveTeamSession(sessionCode, num, teamName);
 
     return { success: true, teamNumber: num, sessionCode };
   }
 
   /**
    * SET SESSION PHASE (ADMIN CONTROL)
+   * Instant non-blocking execution (0ms lag!)
    */
   async setSessionPhase(sessionCode, phase) {
-    let session = await this.getSession(sessionCode);
+    let session = this.sessionCache.get(sessionCode) || this.getLocalSession(sessionCode);
+    if (!session) {
+      session = await this.getSession(sessionCode);
+    }
     if (!session) throw new Error('Sesi tidak ditemukan.');
 
     let duration = 0;
-    if (phase === 'GAME1_MEMORIZE') duration = session.settings?.game1MemorizeTime || 35;
-    else if (phase === 'GAME1_PLAY') duration = session.settings?.game1PlayTime || 75;
+    if (phase === 'GAME1' || phase === 'GAME1_PLAY') duration = 0;
+    else if (phase === 'GAME1_MEMORIZE') duration = 15; // 15 detik Clash of Champions
     else if (phase === 'GAME2') duration = (session.settings?.game2WordTime || 20) * 10;
     else if (phase === 'GAME3') duration = session.settings?.game3TotalTime || 120;
     else if (phase === 'FINISHED') duration = 0;
@@ -327,84 +347,141 @@ class FirebaseService {
     session.phaseStartTime = this.getServerTime();
     session.phaseDuration = duration;
 
+    // IMMEDIATE LOCAL & CLOUD RELAY NOTIFY
+    this.notifySessionUpdate(sessionCode, session);
+
+    // Non-blocking Firebase RTDB update in background
     if (this.isFirebaseReady && this.db) {
       try {
         const sessionRef = this.fbRef(this.db, `sessions/${sessionCode}`);
-        await this.fbUpdate(sessionRef, {
+        this.fbUpdate(sessionRef, {
           status: phase,
           currentPhase: phase,
           phaseStartTime: session.phaseStartTime,
           phaseDuration: duration
-        });
-      } catch (e) {
-        console.warn('Firebase setPhase error:', e);
-      }
+        }).catch((e) => console.warn('Firebase setPhase async error:', e));
+      } catch (e) {}
     }
 
-    this.notifySessionUpdate(sessionCode, session);
     return session;
   }
 
   /**
-   * SUBMIT GAME 1 (Shuffle & Recall)
+   * SUBMIT CLASH OF CHAMPIONS SHUFFLE & RECALL (GAME 1)
+   * Sistem Penilaian:
+   * - Setiap kartu pada posisi benar mendapatkan 25 poin
+   * - Setiap kartu pada posisi salah mendapatkan 0 poin
+   * - Skor maksimal 100 poin
    */
-  async submitGame1(sessionCode, teamNumber, userAnswers) {
-    const session = await this.getSession(sessionCode);
+  async submitClashShuffle(sessionCode, teamNumber, submittedOrder) {
+    let session = this.sessionCache.get(sessionCode) || this.getLocalSession(sessionCode);
+    if (!session) session = await this.getSession(sessionCode);
     if (!session || !session.teams || !session.teams[`team_${teamNumber}`]) {
       throw new Error('Data kelompok tidak ditemukan.');
     }
 
     const team = session.teams[`team_${teamNumber}`];
-    if (team.progress?.game1Submitted) {
-      return { success: false, message: 'Game 1 sudah dikirim sebelumnya.' };
-    }
+    if (!team.scores) team.scores = { game1: 0, game2: 0, game3: 0, total: 0 };
+    if (!team.progress) team.progress = {};
 
+    const correctOrder = ['c1', 'c2', 'c3', 'c4'];
     let correctCount = 0;
-    for (const challenge of SHUFFLE_CHALLENGES) {
-      const ans = (userAnswers[challenge.id] || '').trim();
-      if (ans.toLowerCase() === challenge.correctAnswer.toLowerCase()) {
-        correctCount++;
-      }
+    const slotResults = [];
+
+    for (let i = 0; i < 4; i++) {
+      const isMatch = (submittedOrder[i] || '') === correctOrder[i];
+      if (isMatch) correctCount++;
+      slotResults.push({
+        slotIndex: i + 1,
+        submittedCardId: submittedOrder[i],
+        correctCardId: correctOrder[i],
+        isCorrect: isMatch
+      });
     }
 
-    let score = correctCount * 2.5;
-    if (correctCount === SHUFFLE_CHALLENGES.length) {
-      score += 5; // Perfect 10/10 bonus
-    }
-    score = Math.min(30, Math.round(score * 10) / 10);
-
+    const score = correctCount * 25; // 25 pts each, max 100
     team.scores.game1 = score;
-    team.scores.total = Math.min(100, Math.round((team.scores.game1 + (team.scores.game2 || 0) + (team.scores.game3 || 0)) * 10) / 10);
+
+    // Total keseluruhan: Game 1 (bobot 30% / 30 poin maks), Game 2 (35 poin maks), Game 3 (35 poin maks)
+    const g1Weighted = Math.round(score * 0.3 * 10) / 10;
+    const g2 = team.scores.game2 || 0;
+    const g3 = team.scores.game3 || 0;
+    team.scores.total = Math.min(100, Math.round((g1Weighted + g2 + g3) * 10) / 10);
     team.predicate = getPredicate(team.scores.total).title;
     team.progress.game1Submitted = true;
+    team.progress.game1Order = submittedOrder;
+    team.progress.game1Score = score;
+    team.progress.game1CorrectCount = correctCount;
 
+    // Synchronous immediate dispatch
+    this.notifySessionUpdate(sessionCode, session);
+
+    // Non-blocking Firebase write
     if (this.isFirebaseReady && this.db) {
       try {
         const teamRef = this.fbRef(this.db, `sessions/${sessionCode}/teams/team_${teamNumber}`);
-        await this.fbUpdate(teamRef, {
+        this.fbUpdate(teamRef, {
           'scores/game1': score,
           'scores/total': team.scores.total,
           'progress/game1Submitted': true,
+          'progress/game1Order': submittedOrder,
+          'progress/game1Score': score,
+          'progress/game1CorrectCount': correctCount,
           predicate: team.predicate
-        });
+        }).catch((e) => console.warn('Firebase submit Game1 error:', e));
       } catch (e) {}
     }
 
-    this.notifySessionUpdate(sessionCode, session);
     return {
       success: true,
       score,
       correctCount,
-      totalItems: SHUFFLE_CHALLENGES.length,
-      isPerfect: correctCount === SHUFFLE_CHALLENGES.length
+      wrongCount: 4 - correctCount,
+      slotResults,
+      submittedOrder,
+      correctOrder
     };
+  }
+
+  /**
+   * BACKWARD COMPATIBLE SUBMIT GAME 1
+   */
+  async submitGame1(sessionCode, teamNumber, payload) {
+    if (Array.isArray(payload)) {
+      return this.submitClashShuffle(sessionCode, teamNumber, payload);
+    }
+    // Object answers fallback
+    let session = this.sessionCache.get(sessionCode) || this.getLocalSession(sessionCode);
+    if (!session) session = await this.getSession(sessionCode);
+    if (!session || !session.teams || !session.teams[`team_${teamNumber}`]) {
+      throw new Error('Data kelompok tidak ditemukan.');
+    }
+
+    const team = session.teams[`team_${teamNumber}`];
+    let correctCount = 0;
+    for (const challenge of SHUFFLE_CHALLENGES) {
+      const ans = ((payload && payload[challenge.id]) || '').trim();
+      if (ans.toLowerCase() === challenge.correctAnswer.toLowerCase()) {
+        correctCount++;
+      }
+    }
+    const score = Math.round((correctCount / SHUFFLE_CHALLENGES.length) * 100);
+    team.scores.game1 = score;
+    const g1Weighted = Math.round(score * 0.3 * 10) / 10;
+    team.scores.total = Math.min(100, Math.round((g1Weighted + (team.scores.game2 || 0) + (team.scores.game3 || 0)) * 10) / 10);
+    team.predicate = getPredicate(team.scores.total).title;
+    team.progress.game1Submitted = true;
+
+    this.notifySessionUpdate(sessionCode, session);
+    return { success: true, score, correctCount };
   }
 
   /**
    * SUBMIT GAME 2 SINGLE WORD
    */
   async submitGame2Word(sessionCode, teamNumber, itemId, answer, remainingSec = 0) {
-    const session = await this.getSession(sessionCode);
+    let session = this.sessionCache.get(sessionCode) || this.getLocalSession(sessionCode);
+    if (!session) session = await this.getSession(sessionCode);
     if (!session || !session.teams || !session.teams[`team_${teamNumber}`]) {
       throw new Error('Data kelompok tidak ditemukan.');
     }
@@ -431,21 +508,23 @@ class FirebaseService {
     const newG2 = Math.min(35, Math.round((currentG2 + addedScore) * 10) / 10);
 
     team.scores.game2 = newG2;
-    team.scores.total = Math.min(100, Math.round(((team.scores.game1 || 0) + newG2 + (team.scores.game3 || 0)) * 10) / 10);
+    const g1Weighted = Math.round((team.scores.game1 || 0) * 0.3 * 10) / 10;
+    team.scores.total = Math.min(100, Math.round((g1Weighted + newG2 + (team.scores.game3 || 0)) * 10) / 10);
     team.predicate = getPredicate(team.scores.total).title;
+
+    this.notifySessionUpdate(sessionCode, session);
 
     if (this.isFirebaseReady && this.db) {
       try {
         const teamRef = this.fbRef(this.db, `sessions/${sessionCode}/teams/team_${teamNumber}`);
-        await this.fbUpdate(teamRef, {
+        this.fbUpdate(teamRef, {
           'scores/game2': newG2,
           'scores/total': team.scores.total,
           predicate: team.predicate
-        });
+        }).catch((e) => console.warn('Firebase submit Game2 error:', e));
       } catch (e) {}
     }
 
-    this.notifySessionUpdate(sessionCode, session);
     return {
       success: true,
       correct: isCorrect,
@@ -459,7 +538,8 @@ class FirebaseService {
    * SUBMIT GAME 3 CALCULATION
    */
   async submitGame3Calculation(sessionCode, teamNumber, itemId, rawAnswer, remainingSec = 0) {
-    const session = await this.getSession(sessionCode);
+    let session = this.sessionCache.get(sessionCode) || this.getLocalSession(sessionCode);
+    if (!session) session = await this.getSession(sessionCode);
     if (!session || !session.teams || !session.teams[`team_${teamNumber}`]) {
       throw new Error('Data kelompok tidak ditemukan.');
     }
@@ -496,21 +576,23 @@ class FirebaseService {
     const newG3 = Math.min(35, Math.round((currentG3 + addedScore) * 10) / 10);
 
     team.scores.game3 = newG3;
-    team.scores.total = Math.min(100, Math.round(((team.scores.game1 || 0) + (team.scores.game2 || 0) + newG3) * 10) / 10);
+    const g1Weighted = Math.round((team.scores.game1 || 0) * 0.3 * 10) / 10;
+    team.scores.total = Math.min(100, Math.round((g1Weighted + (team.scores.game2 || 0) + newG3) * 10) / 10);
     team.predicate = getPredicate(team.scores.total).title;
+
+    this.notifySessionUpdate(sessionCode, session);
 
     if (this.isFirebaseReady && this.db) {
       try {
         const teamRef = this.fbRef(this.db, `sessions/${sessionCode}/teams/team_${teamNumber}`);
-        await this.fbUpdate(teamRef, {
+        this.fbUpdate(teamRef, {
           'scores/game3': newG3,
           'scores/total': team.scores.total,
           predicate: team.predicate
-        });
+        }).catch((e) => console.warn('Firebase submit Game3 error:', e));
       } catch (e) {}
     }
 
-    this.notifySessionUpdate(sessionCode, session);
     return {
       success: true,
       correct: isCorrect,
@@ -525,7 +607,8 @@ class FirebaseService {
    * RESET SESSION
    */
   async resetSession(sessionCode) {
-    const session = await this.getSession(sessionCode);
+    let session = this.sessionCache.get(sessionCode) || this.getLocalSession(sessionCode);
+    if (!session) session = await this.getSession(sessionCode);
     if (!session) return;
 
     session.status = 'LOBBY';
@@ -540,27 +623,35 @@ class FirebaseService {
       });
     }
 
+    this.notifySessionUpdate(sessionCode, session);
+
     if (this.isFirebaseReady && this.db) {
       try {
         const sessionRef = this.fbRef(this.db, `sessions/${sessionCode}`);
-        await this.fbSet(sessionRef, session);
+        this.fbSet(sessionRef, session).catch((e) => console.warn('Firebase reset error:', e));
       } catch (e) {}
     }
 
-    this.notifySessionUpdate(sessionCode, session);
     return session;
   }
 
   /**
-   * LISTEN TO SESSION IN REALTIME (FIREBASE + CLOUD RELAY + STORAGE)
+   * LISTEN TO SESSION IN REALTIME (ULTRA-RESPONSIVE)
+   * Instant local cache + SSE + 1.2s Polling + Window Focus
    */
   listenToSession(sessionCode, callback) {
+    if (!sessionCode) return () => {};
+
     if (!this.listeners.has(sessionCode)) {
       this.listeners.set(sessionCode, new Set());
     }
     this.listeners.get(sessionCode).add(callback);
 
-    // Initial load
+    // Initial load: return cached session immediately (0ms!)
+    const cached = this.sessionCache.get(sessionCode) || this.getLocalSession(sessionCode);
+    if (cached) {
+      callback(cached);
+    }
     this.getSession(sessionCode).then((s) => {
       if (s) callback(s);
     });
@@ -578,18 +669,41 @@ class FirebaseService {
       } catch (e) {}
     }
 
-    // 2. Global Cloud Relay SSE Listener (For cross-device sync)
+    // 2. Global Cloud Relay SSE Listener (Instant cross-device push)
     const cleanupSSE = this.listenToCloudRelay(sessionCode, (data) => {
       if (this.listeners.has(sessionCode)) {
+        this.sessionCache.set(sessionCode, data);
         this.listeners.get(sessionCode).forEach((cb) => cb(data));
       }
     });
 
-    // 3. Storage event for multi-tab
+    // 3. Active 1.2s Polling fallback (Ensures zero lag even if SSE disconnects)
+    const pollInterval = setInterval(async () => {
+      try {
+        const remote = await this.fetchFromCloudRelay(sessionCode);
+        if (remote) {
+          const cur = this.sessionCache.get(sessionCode);
+          if (!cur || remote.currentPhase !== cur.currentPhase || remote.status !== cur.status || JSON.stringify(remote.teams) !== JSON.stringify(cur.teams)) {
+            this.notifySessionUpdate(sessionCode, remote);
+          }
+        }
+      } catch (e) {}
+    }, 1200);
+
+    // 4. Focus event listener
+    const onFocus = () => {
+      this.fetchFromCloudRelay(sessionCode).then((remote) => {
+        if (remote) this.notifySessionUpdate(sessionCode, remote);
+      }).catch(() => {});
+    };
+    window.addEventListener('focus', onFocus);
+
+    // 5. Storage event for multi-tab
     const storageHandler = (e) => {
       if (e.key === `tc_session_${sessionCode}` && e.newValue) {
         try {
           const val = JSON.parse(e.newValue);
+          this.sessionCache.set(sessionCode, val);
           callback(val);
         } catch (err) {}
       }
@@ -600,40 +714,67 @@ class FirebaseService {
       if (this.listeners.has(sessionCode)) {
         this.listeners.get(sessionCode).delete(callback);
       }
+      clearInterval(pollInterval);
       if (cleanupSSE) cleanupSSE();
+      window.removeEventListener('focus', onFocus);
       window.removeEventListener('storage', storageHandler);
     };
   }
 
   /**
-   * GET SESSION (FIREBASE -> CLOUD RELAY -> LOCALSTORAGE)
+   * GET SESSION (CACHE -> CLOUD RELAY -> LOCALSTORAGE -> FIREBASE)
+   * Never hangs or blocks the UI!
    */
   async getSession(sessionCode) {
-    // 1. Try Firebase RTDB
+    if (!sessionCode) return null;
+
+    // 1. Check in-memory cache first (0ms)
+    if (this.sessionCache.has(sessionCode)) {
+      return this.sessionCache.get(sessionCode);
+    }
+
+    // 2. Check LocalStorage
+    const local = this.getLocalSession(sessionCode);
+    if (local) {
+      this.sessionCache.set(sessionCode, local);
+      this.fetchFromCloudRelay(sessionCode).then((remote) => {
+        if (remote && JSON.stringify(remote) !== JSON.stringify(local)) {
+          this.notifySessionUpdate(sessionCode, remote);
+        }
+      }).catch(() => {});
+      return local;
+    }
+
+    // 3. Fast race between Cloud Relay and Firebase (Max 600ms timeout)
+    const fetchCloud = this.fetchFromCloudRelay(sessionCode);
+    let fetchFb = null;
     if (this.isFirebaseReady && this.db) {
       try {
         const sRef = this.fbRef(this.db, `sessions/${sessionCode}`);
-        const snap = await this.fbGet(sRef);
-        if (snap.exists()) {
-          const val = snap.val();
-          try {
-            localStorage.setItem(`tc_session_${sessionCode}`, JSON.stringify(val));
-          } catch (e) {}
-          return val;
-        }
+        fetchFb = this.fbGet(sRef).then((snap) => (snap.exists() ? snap.val() : null)).catch(() => null);
       } catch (e) {}
     }
 
-    // 2. Try Global Cloud Relay (Fetches from Internet Relay for remote devices)
-    const cloudSession = await this.fetchFromCloudRelay(sessionCode);
-    if (cloudSession) {
-      try {
-        localStorage.setItem(`tc_session_${sessionCode}`, JSON.stringify(cloudSession));
-      } catch (e) {}
-      return cloudSession;
+    const timeout = new Promise((resolve) => setTimeout(() => resolve(null), 600));
+
+    try {
+      const candidates = [fetchCloud, timeout];
+      if (fetchFb) candidates.push(fetchFb);
+      const result = await Promise.race(candidates);
+      if (result) {
+        this.sessionCache.set(sessionCode, result);
+        try { localStorage.setItem(`tc_session_${sessionCode}`, JSON.stringify(result)); } catch (e) {}
+        return result;
+      }
+    } catch (e) {}
+
+    // Fallback to cloud relay or local
+    const cloudFallback = await fetchCloud.catch(() => null);
+    if (cloudFallback) {
+      this.sessionCache.set(sessionCode, cloudFallback);
+      return cloudFallback;
     }
 
-    // 3. Fallback to LocalStorage
     return this.getLocalSession(sessionCode);
   }
 

@@ -9,7 +9,7 @@ import { toast } from '../components/notification.js';
 import { exportSessionToCSV } from '../services/export-service.js';
 import { firebaseConfig, ADMIN_CREDENTIALS } from '../config/firebase-config.js';
 
-export function renderAdminView(container, { onExit }) {
+export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
   let activeSessionCode = null;
   let unsubscribe = null;
   let currentSessionData = null;
@@ -90,7 +90,7 @@ export function renderAdminView(container, { onExit }) {
           <div class="tc-cockpit-session-box" id="session-box-controls">
             <div class="tc-code-display">
               <span class="tc-code-lbl">KODE SESI SISWA</span>
-              <span class="tc-code-val" id="disp-session-code">BELUM DIBUAT</span>
+              <span class="tc-code-val" id="disp-session-code">MEMUAT...</span>
             </div>
             <div class="tc-code-btn-group">
               <button id="btn-copy-code" class="tc-btn tc-btn-sm tc-btn-outline" title="Salin Kode">📋 Salin</button>
@@ -102,37 +102,36 @@ export function renderAdminView(container, { onExit }) {
 
         <!-- Master Phase Controller Bar -->
         <div class="tc-card tc-phase-bar-card">
-          <div class="tc-phase-bar-title">KENDALI FASE PERMAINAN (TERSYNCHRONIZE KE SEMUA KELOMPOK)</div>
+          <div class="tc-phase-bar-title">KENDALI FASE PERMAINAN (TERSYNCHRONIZE INSTAN KE SEMUA KELOMPOK)</div>
           <div class="tc-phase-btn-row">
             <button class="tc-btn tc-btn-phase" data-phase="LOBBY" id="phase-btn-lobby">
               <span class="tc-phase-num">0</span>
               <span>Lobi Persiapan</span>
             </button>
-            <button class="tc-btn tc-btn-phase" data-phase="GAME1_MEMORIZE" id="phase-btn-g1-mem">
-              <span class="tc-phase-num">1A</span>
-              <span>Game 1: Menghafal (35s)</span>
-            </button>
-            <button class="tc-btn tc-btn-phase" data-phase="GAME1_PLAY" id="phase-btn-g1-play">
-              <span class="tc-phase-num">1B</span>
-              <span>Game 1: Susun & Cocokkan (75s)</span>
+            <button class="tc-btn tc-btn-phase" data-phase="GAME1" id="phase-btn-g1">
+              <span class="tc-phase-num">1</span>
+              <span>Game 1: Shuffle & Recall (100 Poin)</span>
             </button>
             <button class="tc-btn tc-btn-phase" data-phase="GAME2" id="phase-btn-g2">
               <span class="tc-phase-num">2</span>
-              <span>Game 2: Word Scramble</span>
+              <span>Game 2: Word Scramble (35 Poin)</span>
             </button>
             <button class="tc-btn tc-btn-phase" data-phase="GAME3" id="phase-btn-g3">
               <span class="tc-phase-num">3</span>
-              <span>Game 3: Extreme Addition (120s)</span>
+              <span>Game 3: Extreme Addition (35 Poin)</span>
             </button>
             <button class="tc-btn tc-btn-phase gold" data-phase="FINISHED" id="phase-btn-finish">
               <span class="tc-phase-num">🏆</span>
-              <span>Buka Leaderboard</span>
+              <span>Selesai (Buka Leaderboard)</span>
             </button>
           </div>
         </div>
 
         <!-- Quick Tools Bar -->
         <div class="tc-admin-tools-row">
+          <button id="btn-open-leaderboard-screen" class="tc-btn tc-btn-primary" style="background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 0 15px rgba(245, 158, 11, 0.4); font-weight: 800;">
+            <span>🏆 Tampilkan Layar Leaderboard (Podium Juara)</span>
+          </button>
           <button id="btn-export-csv" class="tc-btn tc-btn-secondary">
             <span>📥 Unduh Rekap Hasil (CSV)</span>
           </button>
@@ -148,7 +147,7 @@ export function renderAdminView(container, { onExit }) {
         <div class="tc-admin-monitor-section">
           <div class="tc-monitor-header-row">
             <h3 class="tc-monitor-title">Live Scoreboard 8 Kelompok</h3>
-            <span class="tc-live-indicator"><span class="tc-pulse-dot"></span> PEMBARUAN OTOMATIS</span>
+            <span class="tc-live-indicator"><span class="tc-pulse-dot"></span> SINKRONISASI AKTIF</span>
           </div>
 
           <div class="tc-admin-teams-grid" id="admin-teams-grid">
@@ -163,7 +162,7 @@ export function renderAdminView(container, { onExit }) {
 
                 <div class="tc-atc-scores">
                   <div class="tc-score-col">
-                    <span class="tc-sc-lbl">G1 (30)</span>
+                    <span class="tc-sc-lbl">G1 (100)</span>
                     <strong class="tc-sc-val" id="atc-g1-${n}">0</strong>
                   </div>
                   <div class="tc-score-col">
@@ -197,6 +196,7 @@ export function renderAdminView(container, { onExit }) {
     const btnExportCSV = dashEl.querySelector('#btn-export-csv');
     const btnSimulate = dashEl.querySelector('#btn-simulate-teams');
     const btnReset = dashEl.querySelector('#btn-reset-session');
+    const btnOpenLb = dashEl.querySelector('#btn-open-leaderboard-screen');
     const dispCode = dashEl.querySelector('#disp-session-code');
 
     // Create Session
@@ -241,10 +241,25 @@ export function renderAdminView(container, { onExit }) {
           studentUrl.searchParams.set('db', firebaseConfig.databaseURL);
         }
         navigator.clipboard.writeText(studentUrl.toString()).then(() => {
-          toast.success('Link HP Siswa disalin! Bagikan ke grup WhatsApp/kelas.');
+          toast.success('Link HP Siswa disalin! Bagikan ke siswa.');
         }).catch(() => {
           toast.info(studentUrl.toString());
         });
+      });
+    }
+
+    // Open Leaderboard Screen directly
+    if (btnOpenLb) {
+      btnOpenLb.addEventListener('click', () => {
+        audio.playClick();
+        if (!activeSessionCode) {
+          toast.warning('Buat sesi terlebih dahulu sebelum membuka leaderboard.');
+          return;
+        }
+        if (unsubscribe) unsubscribe();
+        if (onOpenLeaderboard) {
+          onOpenLeaderboard(activeSessionCode);
+        }
       });
     }
 
@@ -258,9 +273,22 @@ export function renderAdminView(container, { onExit }) {
         }
         audio.playClick();
         const targetPhase = btn.dataset.phase;
+
         try {
           await firebaseService.setSessionPhase(activeSessionCode, targetPhase);
           toast.success(`Fase sesi dialihkan ke: ${targetPhase}`);
+
+          // If finished, offer to open leaderboard
+          if (targetPhase === 'FINISHED') {
+            setTimeout(() => {
+              if (confirm('Fase sesi telah diubah ke FINISHED. Buka layar Leaderboard (Podium Juara) sekarang?')) {
+                if (unsubscribe) unsubscribe();
+                if (onOpenLeaderboard) {
+                  onOpenLeaderboard(activeSessionCode);
+                }
+              }
+            }, 300);
+          }
         } catch (e) {
           toast.error('Gagal mengalihkan fase: ' + e.message);
         }
@@ -313,8 +341,25 @@ export function renderAdminView(container, { onExit }) {
       }
     });
 
-    // Auto-create initial session if none exists
-    btnCreateSession.click();
+    // Check if there is already a recent session in localStorage
+    let existingCode = null;
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('tc_session_TC')) {
+          existingCode = key.replace('tc_session_', '');
+          break;
+        }
+      }
+    } catch (e) {}
+
+    if (existingCode) {
+      activeSessionCode = existingCode;
+      dispCode.textContent = activeSessionCode;
+      attachSessionListener(activeSessionCode);
+    } else {
+      btnCreateSession.click();
+    }
   }
 
   function attachSessionListener(sessionCode) {
@@ -326,7 +371,9 @@ export function renderAdminView(container, { onExit }) {
       // Update Phase Buttons active state
       const curPhase = session.currentPhase || 'LOBBY';
       container.querySelectorAll('.tc-btn-phase').forEach((btn) => {
-        btn.classList.toggle('active', btn.dataset.phase === curPhase);
+        const p = btn.dataset.phase;
+        const isActive = p === curPhase || (p === 'GAME1' && (curPhase === 'GAME1_PLAY' || curPhase === 'GAME1_MEMORIZE'));
+        btn.classList.toggle('active', isActive);
       });
 
       // Update 8 Teams Cards

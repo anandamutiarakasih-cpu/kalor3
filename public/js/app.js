@@ -124,11 +124,10 @@ class ThermoChampionsApp {
       case 'LOBBY':
         this.navigate('waiting');
         break;
+      case 'GAME1':
       case 'GAME1_MEMORIZE':
-        this.navigate('game1_memorize');
-        break;
       case 'GAME1_PLAY':
-        this.navigate('game1_play');
+        this.navigate('game1');
         break;
       case 'GAME2':
         this.navigate('game2');
@@ -194,26 +193,23 @@ class ThermoChampionsApp {
         this.currentViewInstance = renderAdminView(this.appContainer, {
           onExit: () => {
             this.navigate('home');
+          },
+          onOpenLeaderboard: (sessionCode) => {
+            if (sessionCode) this.state.sessionCode = sessionCode;
+            this.navigate('leaderboard');
           }
         });
         break;
 
+      case 'game1':
       case 'game1_memorize':
-        this.currentViewInstance = renderGame1View(this.appContainer, {
-          sessionCode: this.state.sessionCode,
-          teamNumber: this.state.teamNumber,
-          isMemorizePhase: true,
-          onPhaseChange: (newPhase) => {
-            this.routeByPhase(newPhase);
-          }
-        });
-        break;
-
       case 'game1_play':
         this.currentViewInstance = renderGame1View(this.appContainer, {
           sessionCode: this.state.sessionCode,
           teamNumber: this.state.teamNumber,
-          isMemorizePhase: false,
+          onNextGame: () => {
+            this.navigate('game2');
+          },
           onPhaseChange: (newPhase) => {
             this.routeByPhase(newPhase);
           }
@@ -249,6 +245,10 @@ class ThermoChampionsApp {
             this.state.sessionCode = null;
             this.state.teamNumber = null;
             this.navigate('home');
+          },
+          onOpenAdmin: (sessionCode) => {
+            if (sessionCode) this.state.sessionCode = sessionCode;
+            this.navigate('admin');
           }
         });
         break;
