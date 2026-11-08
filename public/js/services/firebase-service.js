@@ -58,7 +58,7 @@ class FirebaseService {
       try {
         await signInAnonymously(this.auth);
       } catch (authErr) {
-        console.warn('⚠️ Anonymous Auth note:', authErr.message);
+        console.info('ℹ️ Note: Firebase Anonymous Auth belum diaktifkan di console. Sinkronisasi sesi tetap berjalan normal via realtime rules.');
       }
 
       // Listen for server time offset

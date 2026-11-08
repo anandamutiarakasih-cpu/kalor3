@@ -94,6 +94,13 @@ export class SyncTimer {
     }
   }
 
+  rebindContainer(newContainer) {
+    if (!newContainer) return;
+    this.container = newContainer;
+    this.render();
+    this.update();
+  }
+
   getRemainingSeconds() {
     const now = this.getServerTime();
     const elapsedSec = (now - this.startTimeMs) / 1000;

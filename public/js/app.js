@@ -5,6 +5,7 @@
 
 import { particleService } from './services/particle-service.js';
 import { firebaseService } from './services/firebase-service.js';
+import { toast } from './components/notification.js';
 import { renderHomeView } from './views/home-view.js';
 import { renderRegisterView } from './views/register-view.js';
 import { renderWaitingView } from './views/waiting-view.js';
@@ -26,35 +27,58 @@ class ThermoChampionsApp {
     };
   }
 
+  setupRefreshWarning() {
+    window.addEventListener('beforeunload', (e) => {
+      // Peringatan saat user sedang berada dalam sesi atau permainan
+      if (this.state.sessionCode || (this.currentRoute && this.currentRoute !== 'home')) {
+        e.preventDefault();
+        const msg = 'Peringatan: Jika halaman di-refresh, progres data permainan akan di-reset dan kembali ke menu awal. Yakin ingin me-refresh?';
+        e.returnValue = msg;
+        return msg;
+      }
+    });
+  }
+
   init() {
     // Start Thermal Energy Ambient Particles
     if (this.canvas) {
       particleService.init(this.canvas);
     }
 
-    // Check for existing saved team session (survive page refresh / reconnect)
-    const stored = firebaseService.getStoredTeamSession();
-    if (stored && stored.sessionCode && stored.teamNumber) {
-      this.state.sessionCode = stored.sessionCode;
-      this.state.teamNumber = stored.teamNumber;
-      this.reconnectSession(stored.sessionCode, stored.teamNumber);
-    } else {
-      // Check if session code was passed in URL (e.g. ?session=TC1234)
-      let urlCode = null;
-      try {
-        if (typeof window !== 'undefined' && window.location && window.location.search) {
-          const urlParams = new URLSearchParams(window.location.search);
-          const rawCode = urlParams.get('session');
-          if (rawCode) urlCode = rawCode.trim().toUpperCase();
-        }
-      } catch (e) {}
+    this.setupRefreshWarning();
 
-      if (urlCode) {
-        this.state.sessionCode = urlCode;
-        this.navigate('register', { sessionCode: urlCode });
-      } else {
-        this.navigate('home');
+    // Cek apakah halaman dibuka akibat tindakan refresh/reload browser
+    const navEntries = typeof performance !== 'undefined' && performance.getEntriesByType ? performance.getEntriesByType('navigation') : [];
+    const isReload = (navEntries && navEntries[0] && navEntries[0].type === 'reload') ||
+                     (typeof performance !== 'undefined' && performance.navigation && performance.navigation.type === 1);
+
+    if (isReload) {
+      // Jika di-refresh: reset data dan kembali ke menu awal
+      firebaseService.clearStoredTeamSession();
+      this.state.sessionCode = null;
+      this.state.teamNumber = null;
+      this.navigate('home');
+      setTimeout(() => {
+        toast.warning('Halaman telah di-refresh. Progres permainan Anda telah di-reset kembali ke menu awal.');
+      }, 500);
+      return;
+    }
+
+    // Normal visit: check if session code was passed in URL (e.g. ?session=TC1234)
+    let urlCode = null;
+    try {
+      if (typeof window !== 'undefined' && window.location && window.location.search) {
+        const urlParams = new URLSearchParams(window.location.search);
+        const rawCode = urlParams.get('session');
+        if (rawCode) urlCode = rawCode.trim().toUpperCase();
       }
+    } catch (e) {}
+
+    if (urlCode) {
+      this.state.sessionCode = urlCode;
+      this.navigate('register', { sessionCode: urlCode });
+    } else {
+      this.navigate('home');
     }
   }
 

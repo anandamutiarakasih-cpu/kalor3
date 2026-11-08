@@ -98,6 +98,7 @@ export function renderGame3View(container, { sessionCode, teamNumber, onGameComp
                 <div class="tc-input-with-unit">
                   <input 
                     type="text" 
+                    inputmode="decimal"
                     id="input-heat-ans" 
                     class="tc-input tc-input-calc" 
                     placeholder="Contoh: ${item.correctAnswer.toLocaleString('id-ID')}" 
@@ -133,15 +134,19 @@ export function renderGame3View(container, { sessionCode, teamNumber, onGameComp
       </div>
     `;
 
-    // Initialize Timer (120s total or synchronized)
-    if (!timerInstance) {
-      const timerBox = container.querySelector('#g3-timer-container');
+    // Initialize or Rebind Timer (120s total or synchronized)
+    const timerBox = container.querySelector('#g3-timer-container');
+    if (timerInstance) {
+      timerInstance.rebindContainer(timerBox);
+    } else {
       firebaseService.getSession(sessionCode).then((session) => {
+        const currentBox = container.querySelector('#g3-timer-container');
+        if (!currentBox) return;
         const startTime = session?.phaseStartTime || Date.now();
         const duration = session?.settings?.game3TotalTime || 120;
 
         timerInstance = new SyncTimer({
-          container: timerBox,
+          container: currentBox,
           durationSec: duration,
           startTimeMs: startTime,
           getServerTime: () => firebaseService.getServerTime(),
