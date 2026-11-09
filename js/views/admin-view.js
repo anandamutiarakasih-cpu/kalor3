@@ -95,6 +95,7 @@ export function renderAdminView(container, { onExit }) {
             <div class="tc-code-btn-group">
               <button id="btn-copy-code" class="tc-btn tc-btn-sm tc-btn-outline" title="Salin Kode">📋 Salin</button>
               <button id="btn-copy-link" class="tc-btn tc-btn-sm tc-btn-secondary" title="Salin Link HP Siswa">🔗 Salin Link HP</button>
+              <button id="btn-server-config" class="tc-btn tc-btn-sm tc-btn-ghost" title="Pengaturan Server Backend">⚙️ <span id="disp-server-badge">Server</span></button>
               <button id="btn-open-existing-session" class="tc-btn tc-btn-sm tc-btn-ghost" title="Buka kode sesi yang sudah dibuat sebelumnya">🔍 Buka Sesi</button>
               <button id="btn-create-new-session" class="tc-btn tc-btn-sm tc-btn-primary">+ Sesi Baru</button>
             </div>
@@ -235,6 +236,48 @@ export function renderAdminView(container, { onExit }) {
           localStorage.setItem('tc_admin_active_session', activeSessionCode);
           toast.success(`Terhubung ke sesi: ${activeSessionCode}`);
           attachSessionListener(activeSessionCode);
+        }
+      });
+    }
+
+    // Backend Server Status & Dynamic Configuration
+    const btnServerConfig = dashEl.querySelector('#btn-server-config');
+    const dispServerBadge = dashEl.querySelector('#disp-server-badge');
+
+    function updateServerStatusBadge() {
+      if (!dispServerBadge) return;
+      if (firebaseService.isConnected) {
+        dispServerBadge.textContent = 'Server: 🟢 Online';
+        dispServerBadge.style.color = '#22c55e';
+      } else {
+        dispServerBadge.textContent = 'Mode: ⚡ Mandiri';
+        dispServerBadge.style.color = '#f59e0b';
+      }
+    }
+    updateServerStatusBadge();
+    firebaseService.listenToConnectionStatus(() => updateServerStatusBadge());
+
+    if (btnServerConfig) {
+      btnServerConfig.addEventListener('click', async () => {
+        audio.playClick();
+        const currentUrl = localStorage.getItem('tc_backend_url') || 'http://localhost:3000';
+        const newUrl = prompt(
+          `PENGATURAN SERVER BACKEND (SOCKET.IO):\n\n` +
+          `Status saat ini: ${firebaseService.isConnected ? '🟢 Terhubung ke WebSocket Authoritative' : '🟡 Mode Cadangan Mandiri Aktif (Zero-Timeout)'}\n\n` +
+          `Masukkan URL backend server (contoh: http://localhost:3000 atau https://kalor3.up.railway.app):`,
+          currentUrl
+        );
+
+        if (newUrl !== null && newUrl.trim()) {
+          const clean = newUrl.trim().replace(/\/+$/, '');
+          toast.info('Menghubungkan ke server...');
+          await firebaseService.switchBackendUrl(clean);
+          updateServerStatusBadge();
+          if (firebaseService.isConnected) {
+            toast.success('Berhasil terhubung ke WebSocket Authoritative!');
+          } else {
+            toast.warning('Server belum merespons. Mode cadangan mandiri tetap aktif.');
+          }
         }
       });
     }

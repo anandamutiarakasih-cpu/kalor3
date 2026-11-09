@@ -41,7 +41,7 @@ export const SOCKET_CONFIG = {
       console.warn('[SocketConfig] Error resolving backend URL:', e);
     }
 
-    // Default Railway deployed backend URL
-    return 'https://thermo-champions-production.up.railway.app';
+    // If no custom backend URL is configured yet on production, return empty to enable instant Fail-Safe
+    return '';
   }
 };
