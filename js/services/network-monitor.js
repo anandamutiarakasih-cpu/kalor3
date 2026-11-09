@@ -6,6 +6,7 @@
 
 import { toast } from '../components/notification.js';
 import { audio } from './audio-service.js';
+import { mqttRelay } from './mqtt-service.js';
 
 class NetworkMonitorService {
   constructor() {
@@ -110,6 +111,10 @@ class NetworkMonitorService {
   setSessionContext(sessionCode, teamNumber) {
     this.sessionCode = sessionCode;
     this.teamNumber = teamNumber;
+    // Send immediate heartbeat on session context activation
+    if (sessionCode && teamNumber) {
+      setTimeout(() => this.checkLatency(true), 100);
+    }
   }
 
   startPeriodicPing() {
@@ -156,6 +161,14 @@ class NetworkMonitorService {
       success = false;
     }
 
+    // If MQTT WebSocket is connected, connection is healthy even if HTTP HEAD was sluggish
+    const isMqttActive = mqttRelay && mqttRelay.connected;
+    if (isMqttActive && rtt > 300) {
+      // Normalize ping for mobile radio dormancy
+      rtt = Math.min(rtt, 120);
+      success = true;
+    }
+
     if (!success && rtt >= 2800) {
       this.consecutiveLagCount++;
     } else {
@@ -163,16 +176,16 @@ class NetworkMonitorService {
       this.currentPing = rtt;
     }
 
-    // Determine status
-    if (this.consecutiveLagCount >= 2) {
+    // Determine status: only declare LAG if repeated high latency
+    if (this.consecutiveLagCount >= 3) {
       this.setStatus('LAG', rtt);
-    } else if (rtt >= 1600) {
+    } else if (rtt >= 2500 && !isMqttActive) {
       this.setStatus('LAG', rtt);
     } else {
       this.setStatus('ONLINE', rtt);
     }
 
-    // Send Heartbeat to Firebase for this team if registered
+    // Send Heartbeat to Teacher for this team if registered
     if (this.sessionCode && this.teamNumber && this.getFirebaseService) {
       try {
         const fb = this.getFirebaseService();

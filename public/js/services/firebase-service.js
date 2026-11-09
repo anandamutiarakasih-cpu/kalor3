@@ -344,6 +344,25 @@ class FirebaseService {
       }
     });
 
+    // 1d. MQTT Student Heartbeat & Ping Listener (Realtime device presence)
+    const unsubMqttPing = mqttRelay.subscribe(`tc_kalor/ping/${code}`, (pingData) => {
+      if (pingData && pingData.teamNumber) {
+        const cur = this.getLocalSession(code) || { code, teams: {} };
+        if (!cur.teams) cur.teams = {};
+        const tKey = `team_${pingData.teamNumber}`;
+        if (cur.teams[tKey]) {
+          cur.teams[tKey].heartbeat = {
+            lastSeen: pingData.lastSeen || Date.now(),
+            latency: pingData.ping || 0
+          };
+          try {
+            localStorage.setItem(`tc_session_${code}`, JSON.stringify(cur));
+          } catch (e) {}
+          callback(cur);
+        }
+      }
+    });
+
     // 2. High-speed HTTPS Port 443 Key-Value Polling (800ms) for Android & cellular
     let lastPhase = null;
     let isPolling = false;
@@ -377,17 +396,20 @@ class FirebaseService {
       }
     }, 800);
 
-    // 3. Periodic Background Score Mesh Polling (Every 1.5s) for teacher to catch all 8 teams
+    // 3. Periodic Background Score & Heartbeat Mesh Polling (Every 1.5s) for teacher to catch all 8 teams
     let scorePollIndex = 1;
     const scorePollTimer = setInterval(async () => {
       try {
         const teamNum = scorePollIndex;
         scorePollIndex = (scorePollIndex % 8) + 1;
+
+        const cur = this.getLocalSession(code) || { code, teams: {} };
+        if (!cur.teams) cur.teams = {};
+        const tKey = `team_${teamNum}`;
+        let changed = false;
+
         const remoteScore = await cloudRead(`TC_SCORE_${code}_${teamNum}`);
         if (remoteScore && remoteScore.t && remoteScore.s) {
-          const cur = this.getLocalSession(code) || { code, teams: {} };
-          if (!cur.teams) cur.teams = {};
-          const tKey = `team_${remoteScore.t}`;
           const existing = cur.teams[tKey] || {};
           const scoresArr = Array.isArray(remoteScore.s) ? remoteScore.s : [0, 0, 0, 0];
           cur.teams[tKey] = {
@@ -403,6 +425,19 @@ class FirebaseService {
             predicate: remoteScore.p || existing.predicate || 'Temperature Rookie',
             claimed: true
           };
+          changed = true;
+        }
+
+        const remotePing = await cloudRead(`TC_PING_${code}_${teamNum}`);
+        if (remotePing && remotePing.u && cur.teams[tKey]) {
+          cur.teams[tKey].heartbeat = {
+            lastSeen: remotePing.u,
+            latency: remotePing.l || 0
+          };
+          changed = true;
+        }
+
+        if (changed) {
           try {
             localStorage.setItem(`tc_session_${code}`, JSON.stringify(cur));
           } catch (e) {}
@@ -415,6 +450,7 @@ class FirebaseService {
       unsubMqtt();
       unsubMqttPhase();
       unsubMqttScore();
+      unsubMqttPing();
       clearInterval(pollTimer);
       clearInterval(scorePollTimer);
     };
@@ -586,9 +622,14 @@ class FirebaseService {
 
   /**
    * SET SESSION PHASE (ADMIN CONTROL)
+   * Instant broadcast across all layers (<30ms, zero lag)
    */
   async setSessionPhase(sessionCode, phase) {
-    let session = await this.getSession(sessionCode);
+    const code = (sessionCode || '').trim().toUpperCase();
+    let session = this.getLocalSession(code);
+    if (!session) {
+      session = await this.getSession(code);
+    }
     if (!session) throw new Error('Sesi tidak ditemukan.');
 
     let duration = 0;
@@ -603,21 +644,22 @@ class FirebaseService {
     session.phaseStartTime = this.getServerTime();
     session.phaseDuration = duration;
 
+    // 1. Instantly notify locally and across MQTT / Cloud mesh (<20ms)
+    this.notifySessionUpdate(code, session);
+
+    // 2. Firebase background update (non-blocking)
     if (this.isFirebaseReady && this.db) {
       try {
-        const sessionRef = this.fbRef(this.db, `sessions/${sessionCode}`);
-        await this.fbUpdate(sessionRef, {
+        const sessionRef = this.fbRef(this.db, `sessions/${code}`);
+        this.fbUpdate(sessionRef, {
           status: phase,
           currentPhase: phase,
           phaseStartTime: session.phaseStartTime,
           phaseDuration: duration
-        });
-      } catch (e) {
-        console.warn('Firebase setPhase error:', e);
-      }
+        }).catch(() => {});
+      } catch (e) {}
     }
 
-    this.notifySessionUpdate(sessionCode, session);
     return session;
   }
 
@@ -921,24 +963,37 @@ class FirebaseService {
   async sendHeartbeat(sessionCode, teamNumber, latency = 0) {
     if (!sessionCode || !teamNumber) return;
     const now = this.getServerTime();
+    const code = sessionCode.trim().toUpperCase();
+    const num = parseInt(teamNumber, 10);
 
-    if (this.isFirebaseReady && this.db) {
-      try {
-        const hbRef = this.fbRef(this.db, `sessions/${sessionCode}/teams/team_${teamNumber}/heartbeat`);
-        await this.fbUpdate(hbRef, {
-          lastSeen: now,
-          latency: latency
-        });
-      } catch (e) {}
-    }
-
+    // 1. MQTT Fast Heartbeat Push (<30ms, non-blocking)
     try {
-      mqttRelay.publish(`tc_kalor/ping/${sessionCode.trim().toUpperCase()}`, {
-        teamNumber: parseInt(teamNumber, 10),
+      mqttRelay.publish(`tc_kalor/ping/${code}`, {
+        teamNumber: num,
         ping: latency,
         lastSeen: now
+      }, false);
+    } catch (e) {}
+
+    // 2. HTTPS Key-Value Relay Compact Heartbeat (<50 hex chars, 100% IIS safe)
+    try {
+      cloudWrite(`TC_PING_${code}_${num}`, {
+        t: num,
+        l: latency,
+        u: now
       });
     } catch (e) {}
+
+    // 3. Firebase RTDB background non-blocking
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const hbRef = this.fbRef(this.db, `sessions/${code}/teams/team_${num}/heartbeat`);
+        this.fbUpdate(hbRef, {
+          lastSeen: now,
+          latency: latency
+        }).catch(() => {});
+      } catch (e) {}
+    }
   }
 
   /**

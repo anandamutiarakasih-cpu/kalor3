@@ -103,7 +103,7 @@ export function renderWaitingView(container, { sessionCode, teamNumber, onPhaseC
         const lastSeen = t.heartbeat?.lastSeen || t.joinedAt || 0;
         const diffSec = Math.max(0, Math.floor((now - lastSeen) / 1000));
         let statusBadge = `<span class="tc-dot-green"></span> Siap (${(t.members || []).length} siswa)`;
-        if (diffSec > 35) {
+        if (diffSec > 60) {
           statusBadge = `<span class="tc-dot-yellow"></span> Menghubungkan ulang...`;
         }
 

@@ -402,9 +402,13 @@ export function renderAdminView(container, { onExit }) {
     }
   }
 
+  let badgeTicker = null;
+
   function attachSessionListener(sessionCode) {
     if (unsubscribe) unsubscribe();
-    unsubscribe = firebaseService.listenToSession(sessionCode, (session) => {
+    if (badgeTicker) clearInterval(badgeTicker);
+
+    function updateTeamCards(session) {
       if (!session) return;
       currentSessionData = session;
 
@@ -440,10 +444,10 @@ export function renderAdminView(container, { onExit }) {
           const latency = t.heartbeat?.latency || 0;
           const diffSec = Math.max(0, Math.floor((now - lastSeen) / 1000));
 
-          if (diffSec <= 15) {
+          if (diffSec <= 30) {
             badgeEl.className = 'tc-atc-badge online';
             badgeEl.innerHTML = `<span class="tc-pulse-dot green"></span> ONLINE ${latency ? `(${latency}ms)` : ''}`;
-          } else if (diffSec <= 40) {
+          } else if (diffSec <= 75) {
             badgeEl.className = 'tc-atc-badge warning';
             badgeEl.innerHTML = `<span class="tc-pulse-dot yellow"></span> LAG (${diffSec}s)`;
           } else {
@@ -494,12 +498,44 @@ export function renderAdminView(container, { onExit }) {
           if (card) grid.appendChild(card);
         });
       }
+    }
+
+    unsubscribe = firebaseService.listenToSession(sessionCode, (session) => {
+      updateTeamCards(session);
     });
+
+    // Keep active team online badges evaluated smoothly every 1.5s
+    badgeTicker = setInterval(() => {
+      if (currentSessionData) {
+        const teams = currentSessionData.teams || {};
+        const now = firebaseService.getServerTime();
+        for (let i = 1; i <= 8; i++) {
+          const t = teams[`team_${i}`];
+          if (!t || !t.claimed) continue;
+          const badgeEl = container.querySelector(`#atc-badge-${i}`);
+          if (!badgeEl) continue;
+          const lastSeen = t.heartbeat?.lastSeen || t.joinedAt || 0;
+          const latency = t.heartbeat?.latency || 0;
+          const diffSec = Math.max(0, Math.floor((now - lastSeen) / 1000));
+          if (diffSec <= 30) {
+            badgeEl.className = 'tc-atc-badge online';
+            badgeEl.innerHTML = `<span class="tc-pulse-dot green"></span> ONLINE ${latency ? `(${latency}ms)` : ''}`;
+          } else if (diffSec <= 75) {
+            badgeEl.className = 'tc-atc-badge warning';
+            badgeEl.innerHTML = `<span class="tc-pulse-dot yellow"></span> LAG (${diffSec}s)`;
+          } else {
+            badgeEl.className = 'tc-atc-badge offline';
+            badgeEl.innerHTML = `<span class="tc-pulse-dot red"></span> TERPUTUS (${diffSec}s)`;
+          }
+        }
+      }
+    }, 1500);
   }
 
   return {
     destroy: () => {
       if (unsubscribe) unsubscribe();
+      if (badgeTicker) clearInterval(badgeTicker);
     }
   };
 }
