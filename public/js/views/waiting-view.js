@@ -37,7 +37,10 @@ export function renderWaitingView(container, { sessionCode, teamNumber, onPhaseC
         <div class="tc-radar-spinner"></div>
         <div class="tc-sync-text">
           <strong>Menunggu Instruksi Guru / Admin...</strong>
-          <span>Tetap berada di halaman ini. Layar akan beralih secara otomatis saat permainan dimulai!</span>
+          <span>Layar akan beralih secara otomatis saat permainan dimulai oleh guru.</span>
+          <button id="btn-manual-sync-check" class="tc-btn tc-btn-sm tc-btn-secondary" style="margin-top: 0.65rem; font-weight: 700;">
+            <span>🔄 Periksa Status Mulai dari Guru</span>
+          </button>
         </div>
       </div>
 
@@ -59,16 +62,41 @@ export function renderWaitingView(container, { sessionCode, teamNumber, onPhaseC
     </div>
   `;
 
+  // Hook manual sync check button
+  const btnCheck = container.querySelector('#btn-manual-sync-check');
+  if (btnCheck) {
+    btnCheck.addEventListener('click', async () => {
+      audio.playClick();
+      btnCheck.disabled = true;
+      btnCheck.innerHTML = `<span>Memeriksa status guru...</span> <span class="tc-radar-spinner"></span>`;
+      try {
+        const s = await firebaseService.getSession(sessionCode);
+        const p = s?.currentPhase || s?.status;
+        if (p && p !== 'LOBBY') {
+          audio.playPhaseTransition();
+          if (unsubscribe) unsubscribe();
+          if (onPhaseChange) onPhaseChange(p, s);
+          return;
+        }
+      } catch (e) {}
+      setTimeout(() => {
+        btnCheck.disabled = false;
+        btnCheck.innerHTML = `<span>🔄 Periksa Status Mulai dari Guru</span>`;
+      }, 1000);
+    });
+  }
+
   // Start Realtime Session Listener
   unsubscribe = firebaseService.listenToSession(sessionCode, (session) => {
     if (!session) return;
 
-    // Check Phase Change
-    if (session.currentPhase && session.currentPhase !== 'LOBBY') {
+    // Check Phase Change (supports currentPhase or status)
+    const phase = session.currentPhase || session.status;
+    if (phase && phase !== 'LOBBY') {
       audio.playPhaseTransition();
       if (unsubscribe) unsubscribe();
       if (onPhaseChange) {
-        onPhaseChange(session.currentPhase, session);
+        onPhaseChange(phase, session);
       }
       return;
     }
