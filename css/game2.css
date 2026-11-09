@@ -120,6 +120,40 @@
   transform: translateY(-2px);
 }
 
+.tc-slot-box.selected {
+  border-color: var(--tc-yellow) !important;
+  box-shadow: 0 0 18px var(--tc-yellow-glow) !important;
+  transform: translateY(-4px) scale(1.08) !important;
+  background: rgba(250, 204, 21, 0.25) !important;
+  animation: pulseSlot 1s infinite alternate;
+}
+
+@keyframes pulseSlot {
+  from { border-color: var(--tc-yellow); }
+  to { border-color: var(--tc-orange); }
+}
+
+/* Reorder Toolbar */
+.tc-reorder-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: -1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.tc-reorder-toolbar .tc-btn-xs {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 /* Letter Tiles Pool */
 .tc-tiles-pool {
   display: flex;
@@ -232,3 +266,123 @@
   line-height: 1.5;
   margin-bottom: 2rem;
 }
+
+/* ========================================================
+   DRAG AND DROP & TOUCH STYLING
+   ======================================================== */
+.tc-slot-box.drag-over {
+  border-color: var(--tc-yellow) !important;
+  background: rgba(250, 204, 21, 0.35) !important;
+  box-shadow: 0 0 20px var(--tc-yellow-glow) !important;
+  transform: scale(1.12) !important;
+}
+
+.tc-letter-tile.dragging,
+.tc-slot-box.dragging {
+  opacity: 0.35;
+  transform: scale(0.92);
+}
+
+.tc-touch-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 99999;
+  transform: translate(-50%, -50%);
+  width: 52px;
+  height: 58px;
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.95) 0%, rgba(234, 88, 12, 0.95) 100%);
+  border: 2px solid var(--tc-yellow);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6), 0 0 20px var(--tc-orange-glow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #ffffff;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ========================================================
+   RESPONSIVE MOBILE STYLES (< 640px and < 420px)
+   ======================================================== */
+@media (max-width: 640px) {
+  .tc-scramble-board {
+    padding: 1.25rem 0.75rem;
+  }
+
+  .tc-answer-slot-container {
+    gap: 0.35rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .tc-slot-box {
+    width: 38px;
+    height: 46px;
+    font-size: 1.3rem;
+    border-radius: var(--radius-sm);
+  }
+
+  .tc-tiles-pool {
+    gap: 0.35rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .tc-letter-tile {
+    width: 38px;
+    height: 46px;
+    font-size: 1.3rem;
+    border-radius: var(--radius-sm);
+  }
+
+  .tc-reorder-toolbar {
+    margin-top: -0.5rem;
+    margin-bottom: 1rem;
+    gap: 0.35rem;
+  }
+
+  .tc-reorder-toolbar .tc-btn-xs {
+    padding: 0.35rem 0.6rem;
+    font-size: 0.72rem;
+  }
+
+  .tc-scramble-actions {
+    gap: 0.5rem;
+  }
+
+  .tc-scramble-actions .tc-btn {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.82rem;
+  }
+}
+
+@media (max-width: 420px) {
+  .tc-answer-slot-container {
+    gap: 0.25rem;
+  }
+
+  .tc-slot-box {
+    width: 32px;
+    height: 40px;
+    font-size: 1.15rem;
+    border-width: 1.5px;
+  }
+
+  .tc-tiles-pool {
+    gap: 0.25rem;
+  }
+
+  .tc-letter-tile {
+    width: 32px;
+    height: 40px;
+    font-size: 1.15rem;
+    border-width: 1.5px;
+  }
+
+  .tc-clue-text {
+    font-size: 0.92rem;
+  }
+}
+

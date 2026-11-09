@@ -9,59 +9,27 @@ import { particleService } from '../services/particle-service.js';
 import { getPredicate } from '../data/predicates.js';
 import { exportSessionToCSV } from '../services/export-service.js';
 
-export function renderLeaderboardView(container, { sessionCode, teamNumber, onHome, onOpenAdmin }) {
+export function renderLeaderboardView(container, { sessionCode, teamNumber, onHome }) {
   let sessionUnsubscribe = null;
   let currentSession = null;
 
-  // Resolve session code if not directly supplied
-  let resolvedCode = sessionCode;
-  if (!resolvedCode) {
-    const stored = firebaseService.getStoredTeamSession();
-    if (stored && stored.sessionCode) {
-      resolvedCode = stored.sessionCode;
-    } else {
-      // Find latest session key from localStorage
-      try {
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && key.startsWith('tc_session_TC')) {
-            resolvedCode = key.replace('tc_session_', '');
-            break;
-          }
-        }
-      } catch (e) {}
-    }
-  }
-
-  resolvedCode = resolvedCode || 'SESI-AKTIF';
-
   container.innerHTML = `
     <div class="tc-view tc-leaderboard-view">
-      <!-- Top Action Bar -->
-      <div class="tc-top-bar" style="margin-bottom: 1rem;">
-        <button id="btn-lb-back" class="tc-btn tc-btn-ghost">← Menu Utama</button>
-        ${onOpenAdmin ? `
-          <button id="btn-lb-admin-top" class="tc-btn tc-btn-sm tc-btn-secondary">⚙️ Panel Guru</button>
-        ` : ''}
-      </div>
-
       <!-- Header Banner -->
       <header class="tc-lb-header">
         <div class="tc-badge-lab">
           <span class="tc-pulse-dot"></span>
-          KLASEMEN AKHIR KOMPETISI SAINS
+          KLASEMEN AKHIR KOMPETISI
         </div>
         <h1 class="tc-lb-title">
           THERMO <span class="tc-text-gradient">CHAMPIONS</span>
         </h1>
-        <div class="tc-session-tag">SESI: <strong>${resolvedCode}</strong></div>
+        <div class="tc-session-tag">SESI: <strong>${sessionCode}</strong></div>
       </header>
 
       <!-- Olympic Style Podium for Top 3 -->
       <div class="tc-podium-container" id="podium-container">
-        <div style="text-align: center; color: #94a3b8; padding: 2rem;">
-          <span class="tc-radar-spinner"></span> Memuat klasemen podium juara...
-        </div>
+        <!-- Rendered dynamically -->
       </div>
 
       <!-- Complete 8 Teams Ranking Table -->
@@ -88,11 +56,7 @@ export function renderLeaderboardView(container, { sessionCode, teamNumber, onHo
               </tr>
             </thead>
             <tbody id="lb-table-body">
-              <tr>
-                <td colspan="8" style="text-align: center; color: #94a3b8; padding: 1.5rem;">
-                  Menghubungkan data perolehan skor kelompok...
-                </td>
-              </tr>
+              <!-- Dynamically populated -->
             </tbody>
           </table>
         </div>
@@ -141,17 +105,11 @@ export function renderLeaderboardView(container, { sessionCode, teamNumber, onHo
       </div>
 
       <!-- Footer Action -->
-      <div class="tc-lb-footer" style="display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;">
+      <div class="tc-lb-footer">
         <button id="btn-lb-home" class="tc-btn tc-btn-primary tc-btn-large">
           <span>KEMBALI KE BERANDA</span>
           <span>🏠</span>
         </button>
-        ${onOpenAdmin ? `
-          <button id="btn-lb-admin-footer" class="tc-btn tc-btn-secondary tc-btn-large">
-            <span>KEMBALI KE PANEL GURU</span>
-            <span>⚙️</span>
-          </button>
-        ` : ''}
       </div>
     </div>
   `;
@@ -166,54 +124,67 @@ export function renderLeaderboardView(container, { sessionCode, teamNumber, onHo
   const tableBody = container.querySelector('#lb-table-body');
   const btnExport = container.querySelector('#btn-lb-export-csv');
   const btnHome = container.querySelector('#btn-lb-home');
-  const btnBack = container.querySelector('#btn-lb-back');
-  const btnAdminTop = container.querySelector('#btn-lb-admin-top');
-  const btnAdminFooter = container.querySelector('#btn-lb-admin-footer');
 
   btnExport.addEventListener('click', () => {
     audio.playClick();
     if (currentSession) {
-      exportSessionToCSV(resolvedCode, currentSession);
+      exportSessionToCSV(sessionCode, currentSession);
     }
   });
 
-  const goHome = () => {
+  btnHome.addEventListener('click', () => {
     audio.playClick();
     cleanup();
     if (onHome) onHome();
-  };
+  });
 
-  btnHome.addEventListener('click', goHome);
-  btnBack.addEventListener('click', goHome);
-
-  const goAdmin = () => {
-    audio.playClick();
-    cleanup();
-    if (onOpenAdmin) onOpenAdmin(resolvedCode);
-  };
-
-  if (btnAdminTop) btnAdminTop.addEventListener('click', goAdmin);
-  if (btnAdminFooter) btnAdminFooter.addEventListener('click', goAdmin);
-
-  function renderLeaderboardData(session) {
+  sessionUnsubscribe = firebaseService.listenToSession(sessionCode, (session) => {
     if (!session) return;
     currentSession = session;
 
-    let teams = Object.values(session.teams || {});
+    const rawTeams = Object.values(session.teams || {});
+    // Filter to claimed/active teams or include all 8 teams
+    const teams = rawTeams.filter((t) => t && (t.claimed || (t.scores?.total || 0) > 0));
+    
+    // Sort descending with deterministic multi-tier tie-breakers:
+    // 1. Total score desc
+    // 2. Game 3 score desc
+    // 3. Game 2 score desc
+    // 4. Game 1 score desc
+    // 5. Team number asc
+    teams.sort((a, b) => {
+      const totalA = a.scores?.total || 0;
+      const totalB = b.scores?.total || 0;
+      if (totalB !== totalA) return totalB - totalA;
 
-    // If session has no registered teams yet, generate clean placeholders for 8 teams
-    if (teams.length === 0) {
-      teams = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({
-        number: n,
-        name: `Kelompok ${n}`,
-        scores: { game1: 0, game2: 0, game3: 0, total: 0 },
-        predicate: 'Temperature Rookie',
-        members: []
-      }));
-    }
+      const g3A = a.scores?.game3 || 0;
+      const g3B = b.scores?.game3 || 0;
+      if (g3B !== g3A) return g3B - g3A;
 
-    // Sort descending by total score
-    teams.sort((a, b) => (b.scores?.total || 0) - (a.scores?.total || 0));
+      const g2A = a.scores?.game2 || 0;
+      const g2B = b.scores?.game2 || 0;
+      if (g2B !== g2A) return g2B - g2A;
+
+      const g1A = a.scores?.game1 || 0;
+      const g1B = b.scores?.game1 || 0;
+      if (g1B !== g1A) return g1B - g1A;
+
+      return (a.number || 0) - (b.number || 0);
+    });
+
+    // Compute competitive rank (tied teams share same rank, e.g. 1, 1, 3)
+    let currentRank = 1;
+    teams.forEach((t, idx) => {
+      if (idx > 0) {
+        const prev = teams[idx - 1];
+        const prevTotal = prev.scores?.total || 0;
+        const curTotal = t.scores?.total || 0;
+        if (curTotal < prevTotal) {
+          currentRank = idx + 1;
+        }
+      }
+      t.displayRank = currentRank;
+    });
 
     // Render Podium Top 3 (2nd, 1st, 3rd layout)
     const first = teams[0] || null;
@@ -261,16 +232,18 @@ export function renderLeaderboardView(container, { sessionCode, teamNumber, onHo
     `;
 
     // Render Table Body
-    tableBody.innerHTML = teams.map((t, idx) => {
+    tableBody.innerHTML = teams.map((t) => {
       const pred = getPredicate(t.scores?.total || 0);
       const isMyTeam = teamNumber && t.number === parseInt(teamNumber, 10);
       const membersStr = (t.members || []).map((m) => `${m.name} (${m.absen})`).join(', ');
+      const rankNum = t.displayRank || 1;
+      const rankBadge = rankNum === 1 ? '🥇 1' : rankNum === 2 ? '🥈 2' : rankNum === 3 ? '🥉 3' : `${rankNum}`;
 
       return `
         <tr class="${isMyTeam ? 'highlight-my-team' : ''}">
           <td class="tc-col-rank">
-            <span class="tc-rank-badge ${idx < 3 ? `rank-${idx + 1}` : ''}">
-              ${idx === 0 ? '🥇 1' : idx === 1 ? '🥈 2' : idx === 2 ? '🥉 3' : idx + 1}
+            <span class="tc-rank-badge ${rankNum <= 3 ? `rank-${rankNum}` : ''}">
+              ${rankBadge}
             </span>
           </td>
           <td class="tc-col-name">
@@ -292,19 +265,6 @@ export function renderLeaderboardView(container, { sessionCode, teamNumber, onHo
         </tr>
       `;
     }).join('');
-  }
-
-  // Pre-load from cache if available immediately
-  const localCached = firebaseService.getLocalSession(resolvedCode);
-  if (localCached) {
-    renderLeaderboardData(localCached);
-  }
-
-  // Listen for realtime updates
-  sessionUnsubscribe = firebaseService.listenToSession(resolvedCode, (session) => {
-    if (session) {
-      renderLeaderboardData(session);
-    }
   });
 
   function cleanup() {

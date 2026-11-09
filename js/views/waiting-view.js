@@ -5,7 +5,6 @@
 
 import { firebaseService } from '../services/firebase-service.js';
 import { audio } from '../services/audio-service.js';
-import { toast } from '../components/notification.js';
 
 export function renderWaitingView(container, { sessionCode, teamNumber, onPhaseChange }) {
   let unsubscribe = null;
@@ -38,10 +37,7 @@ export function renderWaitingView(container, { sessionCode, teamNumber, onPhaseC
         <div class="tc-radar-spinner"></div>
         <div class="tc-sync-text">
           <strong>Menunggu Instruksi Guru / Admin...</strong>
-          <span>Layar akan beralih secara otomatis saat permainan dimulai oleh guru.</span>
-          <button id="btn-manual-sync-check" class="tc-btn tc-btn-sm tc-btn-secondary" style="margin-top: 0.65rem; font-weight: 700;">
-            <span>🔄 Periksa Status Mulai dari Guru</span>
-          </button>
+          <span>Tetap berada di halaman ini. Layar akan beralih secara otomatis saat permainan dimulai!</span>
         </div>
       </div>
 
@@ -63,46 +59,16 @@ export function renderWaitingView(container, { sessionCode, teamNumber, onPhaseC
     </div>
   `;
 
-  // Hook manual sync check button
-  const btnCheck = container.querySelector('#btn-manual-sync-check');
-  if (btnCheck) {
-    btnCheck.addEventListener('click', async () => {
-      audio.playClick();
-      btnCheck.disabled = true;
-      btnCheck.innerHTML = `<span>Memeriksa status guru...</span> <span class="tc-radar-spinner"></span>`;
-      try {
-        const s = await firebaseService.getSession(sessionCode);
-        const p = s?.currentPhase || s?.status;
-        if (p && p !== 'LOBBY') {
-          audio.playPhaseTransition();
-          toast.success(`Guru telah memulai sesi (${p})! Membuka permainan...`);
-          if (unsubscribe) unsubscribe();
-          if (onPhaseChange) onPhaseChange(p, s);
-          return;
-        } else {
-          toast.info('Guru masih berada di Lobi Persiapan. Bersiaplah!');
-        }
-      } catch (e) {
-        toast.warning('Sedang menghubungkan ke server guru...');
-      }
-      setTimeout(() => {
-        btnCheck.disabled = false;
-        btnCheck.innerHTML = `<span>🔄 Periksa Status Mulai dari Guru</span>`;
-      }, 1000);
-    });
-  }
-
   // Start Realtime Session Listener
   unsubscribe = firebaseService.listenToSession(sessionCode, (session) => {
     if (!session) return;
 
-    // Check Phase Change (supports currentPhase or status)
-    const phase = session.currentPhase || session.status;
-    if (phase && phase !== 'LOBBY') {
+    // Check Phase Change
+    if (session.currentPhase && session.currentPhase !== 'LOBBY') {
       audio.playPhaseTransition();
       if (unsubscribe) unsubscribe();
       if (onPhaseChange) {
-        onPhaseChange(phase, session);
+        onPhaseChange(session.currentPhase, session);
       }
       return;
     }

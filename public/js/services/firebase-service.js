@@ -1,92 +1,27 @@
 /**
  * THERMO CHAMPIONS: HEAT EDITION
  * Firebase Service & Realtime Synchronization Engine
- * Dual-Engine Realtime Sync:
- * 1. HTTPS Port 443 Cloud Sync (100% Guaranteed connectivity on iPhone Safari, iOS Chrome, iCloud Private Relay & mobile networks)
- * 2. Ultra-Fast Native MQTT-over-WebSocket Mesh Relay (Instant sub-50ms push on Android & PC)
- * 3. BroadcastChannel & LocalStorage (Same-machine multi-tab)
- * 4. Firebase Realtime Database (Background fallback)
+ * Dual-Sync: Firebase RTDB + Global Cloud Relay (SSE/REST) + BroadcastChannel
  */
 
 import { firebaseConfig } from '../config/firebase-config.js';
 import { getPredicate } from '../data/predicates.js';
-import { mqttRelay } from './mqtt-service.js';
 import {
-  SHUFFLE_MEMORIZE_CARDS,
   SHUFFLE_CHALLENGES,
   WORD_SCRAMBLE_ITEMS,
   HEAT_CALCULATION_ITEMS
 } from '../data/questions-bank.js';
-
-// HTTPS Cloud Key-Value Relay on Port 443 (Compatible with iOS Safari, iCloud Private Relay, & all networks)
-const HTTPS_RELAY_APPKEY = 'vjatsu02';
-const HTTPS_RELAY_BASE = 'https://keyvalue.immanuel.co/api/KeyVal';
-
-function toHex(str) {
-  try {
-    const bytes = new TextEncoder().encode(str);
-    let hex = '';
-    for (let i = 0; i < bytes.length; i++) {
-      hex += bytes[i].toString(16).padStart(2, '0');
-    }
-    return hex;
-  } catch (e) {
-    return '';
-  }
-}
-
-function fromHex(hex) {
-  try {
-    if (!hex || typeof hex !== 'string') return '';
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < hex.length; i += 2) {
-      bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-    }
-    return new TextDecoder().decode(bytes);
-  } catch (e) {
-    return '';
-  }
-}
-
-async function cloudWrite(key, data) {
-  try {
-    const payloadStr = typeof data === 'string' ? data : JSON.stringify(data);
-    const hex = toHex(payloadStr);
-    if (!hex) return false;
-    const url = `${HTTPS_RELAY_BASE}/UpdateValue/${HTTPS_RELAY_APPKEY}/${key}/${hex}`;
-    await fetch(url, { method: 'POST', headers: { 'Content-Length': '0' }, cache: 'no-store' });
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-
-async function cloudRead(key) {
-  try {
-    const url = `${HTTPS_RELAY_BASE}/GetValue/${HTTPS_RELAY_APPKEY}/${key}`;
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) return null;
-    const hexVal = await res.json();
-    if (!hexVal || typeof hexVal !== 'string') return null;
-    const decoded = fromHex(hexVal);
-    if (!decoded) return null;
-    return JSON.parse(decoded);
-  } catch (e) {
-    return null;
-  }
-}
 
 class FirebaseService {
   constructor() {
     this.app = null;
     this.db = null;
     this.auth = null;
-    this.isOnline = navigator.onLine;
     this.isFirebaseReady = false;
     this.serverTimeOffset = 0;
     this.broadcast = null;
     this.listeners = new Map();
-    this.sessionCache = new Map();
+    this.activeSSE = new Map(); // sessionCode -> cleanup fn
 
     this.initBroadcastChannel();
     this.initFirebase();
@@ -95,12 +30,12 @@ class FirebaseService {
   initBroadcastChannel() {
     if (typeof BroadcastChannel !== 'undefined') {
       try {
-        this.broadcast = new BroadcastChannel('tc_heat_edition_channel');
+        this.broadcast = new BroadcastChannel('thermo_champions_mesh');
         this.broadcast.onmessage = (event) => {
           this.handleBroadcastMessage(event.data);
         };
       } catch (e) {
-        console.warn('BroadcastChannel note:', e);
+        console.warn('BroadcastChannel not supported:', e);
       }
     }
   }
@@ -108,39 +43,42 @@ class FirebaseService {
   async initFirebase() {
     try {
       const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js');
-      const {
-        getDatabase,
-        ref,
-        set,
-        get,
-        update,
-        onValue,
-        serverTimestamp
-      } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js');
+      const { getDatabase, ref, onValue, set, update, get } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js');
       const { getAuth, signInAnonymously } = await import('https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js');
 
       this.app = initializeApp(firebaseConfig);
-      this.db = getDatabase(this.app);
+      this.db = firebaseConfig.databaseURL ? getDatabase(this.app, firebaseConfig.databaseURL) : getDatabase(this.app);
       this.auth = getAuth(this.app);
-
       this.fbRef = ref;
-      this.fbSet = set;
-      this.fbGet = get;
-      this.fbUpdate = update;
       this.fbOnValue = onValue;
-      this.fbServerTimestamp = serverTimestamp;
+      this.fbSet = set;
+      this.fbUpdate = update;
+      this.fbGet = get;
 
       try {
         await signInAnonymously(this.auth);
-      } catch (authErr) {}
+      } catch (authErr) {
+        console.info('ℹ️ Note: Firebase Anonymous Auth belum diaktifkan di console. Sinkronisasi sesi tetap berjalan normal via realtime rules.');
+      }
 
+      // Listen for server time offset
       const offsetRef = ref(this.db, '.info/serverTimeOffset');
       onValue(offsetRef, (snap) => {
         this.serverTimeOffset = snap.val() || 0;
       });
 
+      // Listen for connection status
+      const connRef = ref(this.db, '.info/connected');
+      onValue(connRef, (snap) => {
+        const val = snap.val();
+        this.isOnline = !!val;
+        console.log(val ? '🟢 Firebase RTDB Online' : '🟠 Firebase RTDB Offline/Connecting');
+      });
+
       this.isFirebaseReady = true;
+      console.log('✅ Firebase Realtime Database Initialized.');
     } catch (err) {
+      console.warn('⚠️ Firebase initial connection note (falling back to Global Cloud Relay):', err.message);
       this.isFirebaseReady = false;
     }
   }
@@ -152,76 +90,114 @@ class FirebaseService {
   handleBroadcastMessage(msg) {
     if (!msg || !msg.type) return;
     const { sessionCode, data } = msg;
-    if (sessionCode && data) {
-      this.sessionCache.set(sessionCode, data);
-      if (this.listeners.has(sessionCode)) {
-        this.listeners.get(sessionCode).forEach((cb) => cb(data));
-      }
+    if (this.listeners.has(sessionCode)) {
+      const callbacks = this.listeners.get(sessionCode);
+      callbacks.forEach((cb) => cb(data));
     }
   }
 
   /**
    * NOTIFY SESSION UPDATE ACROSS ALL LAYERS
-   * Immediate dispatch: MQTT WebSocket (Android/PC) + HTTPS Port 443 (iPhone Safari) + LocalStorage + Firebase
    */
   notifySessionUpdate(sessionCode, sessionData) {
-    const code = (sessionCode || '').trim().toUpperCase();
-    if (!code || !sessionData) return;
-    this.sessionCache.set(code, sessionData);
-
-    // 1. High-Speed Native MQTT WebSocket Broadcast (Instant sub-50ms to Android/PC)
-    try {
-      mqttRelay.publish(`tc_kalor/session/${code}`, sessionData, true);
-    } catch (e) {}
-
-    // 2. HTTPS Port 443 Cloud Sync (Guaranteed delivery to iPhone Safari, iCloud Private Relay, & all networks)
-    if (sessionData.currentPhase) {
-      cloudWrite(`TC_PHASE_${code}`, {
-        code,
-        phase: sessionData.currentPhase,
-        phaseStartTime: sessionData.phaseStartTime || Date.now()
-      });
+    // 1. In-process subscribers
+    if (this.listeners.has(sessionCode)) {
+      this.listeners.get(sessionCode).forEach((cb) => cb(sessionData));
     }
 
-    // 3. In-process subscribers (0ms latency)
-    if (this.listeners.has(code)) {
-      this.listeners.get(code).forEach((cb) => {
-        try { cb(sessionData); } catch (e) { console.error(e); }
-      });
-    }
-
-    // 4. BroadcastChannel for same browser/tabs
+    // 2. BroadcastChannel for same browser/tabs
     if (this.broadcast) {
-      try {
-        this.broadcast.postMessage({
-          type: 'SESSION_UPDATE',
-          sessionCode: code,
-          data: sessionData
-        });
-      } catch (e) {}
+      this.broadcast.postMessage({
+        type: 'SESSION_UPDATE',
+        sessionCode,
+        data: sessionData
+      });
     }
 
-    // 5. LocalStorage persistence
+    // 3. LocalStorage persistence
     try {
-      localStorage.setItem(`tc_session_${code}`, JSON.stringify(sessionData));
+      localStorage.setItem(`tc_session_${sessionCode}`, JSON.stringify(sessionData));
     } catch (e) {}
 
-    // 6. Firebase Realtime Database in background (non-blocking)
-    if (this.isFirebaseReady && this.db) {
-      try {
-        const sRef = this.fbRef(this.db, `sessions/${code}`);
-        this.fbUpdate(sRef, sessionData).catch(() => {});
-      } catch (e) {}
-    }
+    // 4. Global Cloud Relay (Cross-Device Internet Relay)
+    this.publishToCloudRelay(sessionCode, sessionData);
   }
 
   getLocalSession(sessionCode) {
-    const code = (sessionCode || '').trim().toUpperCase();
     try {
-      const raw = localStorage.getItem(`tc_session_${code}`);
+      const raw = localStorage.getItem(`tc_session_${sessionCode}`);
       return raw ? JSON.parse(raw) : null;
     } catch (e) {
       return null;
+    }
+  }
+
+  /**
+   * GLOBAL CLOUD RELAY (ntfy.sh Server-Sent Events & REST)
+   * Ensures devices on different networks (WiFi, 4G, cellular) connect 100% reliably
+   */
+  async publishToCloudRelay(sessionCode, sessionData) {
+    if (!sessionCode || !sessionData) return;
+    try {
+      await fetch(`https://ntfy.sh/tc_kalor_${sessionCode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sessionData)
+      });
+    } catch (err) {
+      console.warn('Cloud relay publish error:', err.message);
+    }
+  }
+
+  async fetchFromCloudRelay(sessionCode) {
+    if (!sessionCode) return null;
+    try {
+      const res = await fetch(`https://ntfy.sh/tc_kalor_${sessionCode}/json?poll=1&since=all`);
+      if (!res.ok) return null;
+      const text = await res.text();
+      const lines = text.trim().split('\n').filter(Boolean);
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const item = JSON.parse(lines[i]);
+          if (item && item.message) {
+            const data = JSON.parse(item.message);
+            if (data && data.code === sessionCode) {
+              return data;
+            }
+          }
+        } catch (e) {}
+      }
+    } catch (err) {
+      console.warn('Cloud relay fetch error:', err.message);
+    }
+    return null;
+  }
+
+  listenToCloudRelay(sessionCode, callback) {
+    if (!sessionCode || typeof EventSource === 'undefined') return () => {};
+    try {
+      const eventSource = new EventSource(`https://ntfy.sh/tc_kalor_${sessionCode}/sse`);
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload && payload.message) {
+            const data = JSON.parse(payload.message);
+            if (data && data.code === sessionCode) {
+              // Cache locally
+              try {
+                localStorage.setItem(`tc_session_${sessionCode}`, JSON.stringify(data));
+              } catch (e) {}
+              callback(data);
+            }
+          }
+        } catch (e) {}
+      };
+      return () => {
+        eventSource.close();
+      };
+    } catch (err) {
+      console.warn('EventSource error:', err.message);
+      return () => {};
     }
   }
 
@@ -253,22 +229,18 @@ class FirebaseService {
       }
     };
 
-    // Broadcast across all layers immediately with retain flag
-    this.notifySessionUpdate(code, sessionData);
-    cloudWrite(`TC_PHASE_${code}`, {
-      code,
-      phase: 'LOBBY',
-      phaseStartTime: Date.now()
-    });
-
-    // Push to Firebase RTDB in background
+    // Push to Firebase RTDB if available
     if (this.isFirebaseReady && this.db) {
       try {
         const sRef = this.fbRef(this.db, `sessions/${code}`);
-        this.fbSet(sRef, sessionData).catch(() => {});
-      } catch (e) {}
+        await this.fbSet(sRef, sessionData);
+      } catch (e) {
+        console.warn('Firebase set error:', e);
+      }
     }
 
+    // Broadcast across all layers
+    this.notifySessionUpdate(code, sessionData);
     return sessionData;
   }
 
@@ -281,29 +253,13 @@ class FirebaseService {
       throw new Error('Nomor kelompok harus berada di antara 1 sampai 8.');
     }
 
-    let session = this.sessionCache.get(sessionCode) || this.getLocalSession(sessionCode);
+    let session = await this.getSession(sessionCode);
     if (!session) {
-      session = await this.getSession(sessionCode);
+      throw new Error(`Sesi dengan kode ${sessionCode} tidak ditemukan.`);
     }
-    if (!session) {
-      // Create local fallback session if not yet synchronized
-      session = {
-        code: sessionCode,
-        title: 'Sesi Pembelajaran Kalor SMP',
-        createdAt: this.getServerTime(),
-        status: 'LOBBY',
-        currentPhase: 'LOBBY',
-        phaseStartTime: null,
-        phaseDuration: 0,
-        teams: {},
-        settings: {
-          game1MemorizeTime: 35,
-          game1PlayTime: 75,
-          game2WordTime: 20,
-          game3TotalTime: 120,
-          maxTeams: 8
-        }
-      };
+
+    if (session.status !== 'LOBBY') {
+      throw new Error('Permainan sudah dimulai atau telah berakhir.');
     }
 
     if (session.teams && session.teams[`team_${num}`] && session.teams[`team_${num}`].claimed) {
@@ -337,38 +293,33 @@ class FirebaseService {
     if (!session.teams) session.teams = {};
     session.teams[`team_${num}`] = teamData;
 
-    // Instant dispatch
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const teamRef = this.fbRef(this.db, `sessions/${sessionCode}/teams/team_${num}`);
+        await this.fbSet(teamRef, teamData);
+      } catch (e) {
+        console.warn('Firebase join error:', e);
+      }
+    }
+
     this.notifySessionUpdate(sessionCode, session);
     this.saveTeamSession(sessionCode, num, teamName);
-    this.cloudSyncTeamScore(sessionCode, num, teamData);
 
     return { success: true, teamNumber: num, sessionCode };
   }
 
   /**
    * SET SESSION PHASE (ADMIN CONTROL)
-   * Instant non-blocking execution (0ms lag!)
    */
   async setSessionPhase(sessionCode, phase) {
-    const code = (sessionCode || '').trim().toUpperCase();
-    let session = this.sessionCache.get(code) || this.getLocalSession(code);
-    if (!session) {
-      session = await this.getSession(code);
-    }
-    if (!session) {
-      session = {
-        code,
-        status: phase,
-        currentPhase: phase,
-        teams: {}
-      };
-    }
+    let session = await this.getSession(sessionCode);
+    if (!session) throw new Error('Sesi tidak ditemukan.');
 
     let duration = 0;
-    if (phase === 'GAME1_MEMORIZE') duration = 35;
-    else if (phase === 'GAME1_PLAY' || phase === 'GAME1') duration = 75;
-    else if (phase === 'GAME2') duration = 200;
-    else if (phase === 'GAME3') duration = 120;
+    if (phase === 'GAME1_MEMORIZE') duration = session.settings?.game1MemorizeTime || 35;
+    else if (phase === 'GAME1_PLAY') duration = session.settings?.game1PlayTime || 75;
+    else if (phase === 'GAME2') duration = (session.settings?.game2WordTime || 20) * 10;
+    else if (phase === 'GAME3') duration = session.settings?.game3TotalTime || 120;
     else if (phase === 'FINISHED') duration = 0;
 
     session.status = phase;
@@ -376,24 +327,29 @@ class FirebaseService {
     session.phaseStartTime = this.getServerTime();
     session.phaseDuration = duration;
 
-    // IMMEDIATE REALTIME DISPATCH VIA MQTT + HTTPS PORT 443 CLOUD
-    this.notifySessionUpdate(code, session);
-    cloudWrite(`TC_PHASE_${code}`, {
-      code,
-      phase,
-      phaseStartTime: session.phaseStartTime,
-      duration
-    });
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const sessionRef = this.fbRef(this.db, `sessions/${sessionCode}`);
+        await this.fbUpdate(sessionRef, {
+          status: phase,
+          currentPhase: phase,
+          phaseStartTime: session.phaseStartTime,
+          phaseDuration: duration
+        });
+      } catch (e) {
+        console.warn('Firebase setPhase error:', e);
+      }
+    }
 
+    this.notifySessionUpdate(sessionCode, session);
     return session;
   }
 
   /**
-   * SUBMIT GAME 1 - SHUFFLE & RECALL (ORIGINAL 10 CHALLENGES - MAX 30 PTS)
+   * SUBMIT GAME 1 (Shuffle & Recall)
    */
   async submitGame1(sessionCode, teamNumber, userAnswers) {
-    let session = this.sessionCache.get(sessionCode) || this.getLocalSession(sessionCode);
-    if (!session) session = await this.getSession(sessionCode);
+    const session = await this.getSession(sessionCode);
     if (!session || !session.teams || !session.teams[`team_${teamNumber}`]) {
       throw new Error('Data kelompok tidak ditemukan.');
     }
@@ -405,37 +361,41 @@ class FirebaseService {
 
     let correctCount = 0;
     for (const challenge of SHUFFLE_CHALLENGES) {
-      const ans = ((userAnswers && userAnswers[challenge.id]) || '').trim();
+      const ans = (userAnswers[challenge.id] || '').trim();
       if (ans.toLowerCase() === challenge.correctAnswer.toLowerCase()) {
         correctCount++;
       }
     }
 
-    // 2.5 pts each + 5 pts perfect bonus = 30 pts max
     let score = correctCount * 2.5;
     if (correctCount === SHUFFLE_CHALLENGES.length) {
-      score += 5;
+      score += 5; // Perfect 10/10 bonus
     }
     score = Math.min(30, Math.round(score * 10) / 10);
 
-    if (!team.scores) team.scores = { game1: 0, game2: 0, game3: 0, total: 0 };
     team.scores.game1 = score;
     team.scores.total = Math.min(100, Math.round((team.scores.game1 + (team.scores.game2 || 0) + (team.scores.game3 || 0)) * 10) / 10);
-    const predObj = getPredicate(team.scores.total);
-    team.predicate = predObj?.title || predObj || 'Temperature Rookie';
-
-    if (!team.progress) team.progress = {};
+    team.predicate = getPredicate(team.scores.total).title;
     team.progress.game1Submitted = true;
-    team.progress.game1CorrectCount = correctCount;
+
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const teamRef = this.fbRef(this.db, `sessions/${sessionCode}/teams/team_${teamNumber}`);
+        await this.fbUpdate(teamRef, {
+          'scores/game1': score,
+          'scores/total': team.scores.total,
+          'progress/game1Submitted': true,
+          predicate: team.predicate
+        });
+      } catch (e) {}
+    }
 
     this.notifySessionUpdate(sessionCode, session);
-    this.cloudSyncTeamScore(sessionCode, teamNumber, team);
-
     return {
       success: true,
       score,
       correctCount,
-      totalQuestions: SHUFFLE_CHALLENGES.length,
+      totalItems: SHUFFLE_CHALLENGES.length,
       isPerfect: correctCount === SHUFFLE_CHALLENGES.length
     };
   }
@@ -444,8 +404,7 @@ class FirebaseService {
    * SUBMIT GAME 2 SINGLE WORD
    */
   async submitGame2Word(sessionCode, teamNumber, itemId, answer, remainingSec = 0) {
-    let session = this.sessionCache.get(sessionCode) || this.getLocalSession(sessionCode);
-    if (!session) session = await this.getSession(sessionCode);
+    const session = await this.getSession(sessionCode);
     if (!session || !session.teams || !session.teams[`team_${teamNumber}`]) {
       throw new Error('Data kelompok tidak ditemukan.');
     }
@@ -473,12 +432,20 @@ class FirebaseService {
 
     team.scores.game2 = newG2;
     team.scores.total = Math.min(100, Math.round(((team.scores.game1 || 0) + newG2 + (team.scores.game3 || 0)) * 10) / 10);
-    const predObj = getPredicate(team.scores.total);
-    team.predicate = predObj?.title || predObj || 'Temperature Rookie';
+    team.predicate = getPredicate(team.scores.total).title;
+
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const teamRef = this.fbRef(this.db, `sessions/${sessionCode}/teams/team_${teamNumber}`);
+        await this.fbUpdate(teamRef, {
+          'scores/game2': newG2,
+          'scores/total': team.scores.total,
+          predicate: team.predicate
+        });
+      } catch (e) {}
+    }
 
     this.notifySessionUpdate(sessionCode, session);
-    this.cloudSyncTeamScore(sessionCode, teamNumber, team);
-
     return {
       success: true,
       correct: isCorrect,
@@ -492,8 +459,7 @@ class FirebaseService {
    * SUBMIT GAME 3 CALCULATION
    */
   async submitGame3Calculation(sessionCode, teamNumber, itemId, rawAnswer, remainingSec = 0) {
-    let session = this.sessionCache.get(sessionCode) || this.getLocalSession(sessionCode);
-    if (!session) session = await this.getSession(sessionCode);
+    const session = await this.getSession(sessionCode);
     if (!session || !session.teams || !session.teams[`team_${teamNumber}`]) {
       throw new Error('Data kelompok tidak ditemukan.');
     }
@@ -531,257 +497,154 @@ class FirebaseService {
 
     team.scores.game3 = newG3;
     team.scores.total = Math.min(100, Math.round(((team.scores.game1 || 0) + (team.scores.game2 || 0) + newG3) * 10) / 10);
-    const predObj = getPredicate(team.scores.total);
-    team.predicate = predObj?.title || predObj || 'Temperature Rookie';
+    team.predicate = getPredicate(team.scores.total).title;
+
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const teamRef = this.fbRef(this.db, `sessions/${sessionCode}/teams/team_${teamNumber}`);
+        await this.fbUpdate(teamRef, {
+          'scores/game3': newG3,
+          'scores/total': team.scores.total,
+          predicate: team.predicate
+        });
+      } catch (e) {}
+    }
 
     this.notifySessionUpdate(sessionCode, session);
-    this.cloudSyncTeamScore(sessionCode, teamNumber, team);
-
     return {
       success: true,
       correct: isCorrect,
       addedScore,
       totalGame3Score: newG3,
       expected: item.correctAnswer,
-      unit: item.unit
+      explanation: item.explanation
     };
   }
 
   /**
-   * CLOUD SYNC HELPERS FOR TEAM SCORES (FOR IPHONE CLIENTS)
-   */
-  async cloudSyncTeamScore(sessionCode, teamNumber, team) {
-    const code = (sessionCode || '').trim().toUpperCase();
-    if (!code || !teamNumber || !team) return;
-    try {
-      const payload = {
-        teamNumber,
-        name: team.name || `Kelompok ${teamNumber}`,
-        scores: team.scores || { game1: 0, game2: 0, game3: 0, total: 0 },
-        progress: team.progress || {},
-        predicate: team.predicate || 'Temperature Rookie',
-        updatedAt: Date.now()
-      };
-      await cloudWrite(`TC_SCORE_${code}_${teamNumber}`, payload);
-      try {
-        mqttRelay.publish(`tc_kalor/score/${code}`, payload, true);
-      } catch (e) {}
-    } catch (e) {}
-  }
-
-  async cloudGetScore(sessionCode, teamNumber) {
-    const code = (sessionCode || '').trim().toUpperCase();
-    if (!code || !teamNumber) return null;
-    return await cloudRead(`TC_SCORE_${code}_${teamNumber}`);
-  }
-
-  /**
-   * RESET SESSION SCORES (ADMIN)
+   * RESET SESSION
    */
   async resetSession(sessionCode) {
-    let session = this.sessionCache.get(sessionCode) || this.getLocalSession(sessionCode);
-    if (!session) session = await this.getSession(sessionCode);
+    const session = await this.getSession(sessionCode);
     if (!session) return;
 
     session.status = 'LOBBY';
     session.currentPhase = 'LOBBY';
     session.phaseStartTime = null;
-
+    session.phaseDuration = 0;
     if (session.teams) {
-      for (const tKey of Object.keys(session.teams)) {
-        const team = session.teams[tKey];
-        team.scores = { game1: 0, game2: 0, game3: 0, total: 0 };
-        team.progress = { game1Submitted: false, game2Index: 0, game3Index: 0 };
-        team.predicate = 'Temperature Rookie';
-        this.cloudSyncTeamScore(sessionCode, team.number, team);
-      }
+      Object.keys(session.teams).forEach((k) => {
+        session.teams[k].scores = { game1: 0, game2: 0, game3: 0, total: 0 };
+        session.teams[k].progress = { game1Submitted: false, game2Index: 0, game3Index: 0 };
+        session.teams[k].predicate = 'Temperature Rookie';
+      });
+    }
+
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const sessionRef = this.fbRef(this.db, `sessions/${sessionCode}`);
+        await this.fbSet(sessionRef, session);
+      } catch (e) {}
     }
 
     this.notifySessionUpdate(sessionCode, session);
-    cloudWrite(`TC_PHASE_${sessionCode}`, {
-      code: sessionCode,
-      phase: 'LOBBY',
-      phaseStartTime: Date.now()
-    });
-
     return session;
   }
 
   /**
-   * REALTIME SESSION LISTENER
-   * Dual-Sync: Instant MQTT WebSocket (Android/PC) + HTTPS Port 443 Polling (iPhone Safari)
+   * LISTEN TO SESSION IN REALTIME (FIREBASE + CLOUD RELAY + STORAGE)
    */
   listenToSession(sessionCode, callback) {
-    const code = (sessionCode || '').trim().toUpperCase();
-    if (!code) return () => {};
-
-    if (!this.listeners.has(code)) {
-      this.listeners.set(code, new Set());
+    if (!this.listeners.has(sessionCode)) {
+      this.listeners.set(sessionCode, new Set());
     }
-    this.listeners.get(code).add(callback);
+    this.listeners.get(sessionCode).add(callback);
 
-    // Initial load: return cached session immediately
-    const cached = this.sessionCache.get(code) || this.getLocalSession(code);
-    if (cached) {
-      try { callback(cached); } catch (e) {}
+    // Initial load
+    this.getSession(sessionCode).then((s) => {
+      if (s) callback(s);
+    });
+
+    // 1. Firebase Live Listener
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const sRef = this.fbRef(this.db, `sessions/${sessionCode}`);
+        this.fbOnValue(sRef, (snap) => {
+          const val = snap.val();
+          if (val) {
+            this.notifySessionUpdate(sessionCode, val);
+          }
+        });
+      } catch (e) {}
     }
 
-    // 1. Live MQTT WebSocket Topic Subscription (Instant push on Android/PC)
-    const unsubMqtt = mqttRelay.subscribe(`tc_kalor/session/${code}`, (data) => {
-      if (data && typeof data === 'object') {
-        this.sessionCache.set(code, data);
-        try {
-          localStorage.setItem(`tc_session_${code}`, JSON.stringify(data));
-        } catch (e) {}
-
-        if (this.listeners.has(code)) {
-          this.listeners.get(code).forEach((cb) => {
-            try { cb(data); } catch (e) {}
-          });
-        }
+    // 2. Global Cloud Relay SSE Listener (For cross-device sync)
+    const cleanupSSE = this.listenToCloudRelay(sessionCode, (data) => {
+      if (this.listeners.has(sessionCode)) {
+        this.listeners.get(sessionCode).forEach((cb) => cb(data));
       }
     });
 
-    // 2. Continuous HTTPS Port 443 Polling (1000ms loop for iPhone Safari & restricted mobile networks)
-    let isPolling = false;
-    const httpsPollInterval = setInterval(async () => {
-      if (isPolling) return;
-      isPolling = true;
-      try {
-        const remote = await cloudRead(`TC_PHASE_${code}`);
-        if (remote && remote.phase) {
-          const cur = this.sessionCache.get(code) || this.getLocalSession(code) || { code, teams: {} };
-          if (cur.currentPhase !== remote.phase || cur.phaseStartTime !== remote.phaseStartTime) {
-            cur.code = code;
-            cur.currentPhase = remote.phase;
-            cur.status = remote.phase;
-            cur.phaseStartTime = remote.phaseStartTime;
-            this.sessionCache.set(code, cur);
-            try { localStorage.setItem(`tc_session_${code}`, JSON.stringify(cur)); } catch (e) {}
-            if (this.listeners.has(code)) {
-              this.listeners.get(code).forEach((cb) => {
-                try { cb(cur); } catch (e) {}
-              });
-            }
-          }
-        }
-      } catch (e) {
-      } finally {
-        isPolling = false;
-      }
-    }, 1000);
-
     // 3. Storage event for multi-tab
     const storageHandler = (e) => {
-      if (e.key === `tc_session_${code}` && e.newValue) {
+      if (e.key === `tc_session_${sessionCode}` && e.newValue) {
         try {
           const val = JSON.parse(e.newValue);
-          this.sessionCache.set(code, val);
           callback(val);
         } catch (err) {}
       }
     };
     window.addEventListener('storage', storageHandler);
 
-    // 4. Window focus event (Immediately pulls state when student switches back to browser tab)
-    const onFocus = () => {
-      this.getSession(code).then((s) => {
-        if (s) callback(s);
-      });
-    };
-    window.addEventListener('focus', onFocus);
-
-    // 5. Firebase RTDB listener if available
-    if (this.isFirebaseReady && this.db) {
-      try {
-        const sRef = this.fbRef(this.db, `sessions/${code}`);
-        this.fbOnValue(sRef, (snap) => {
-          const val = snap.val();
-          if (val) {
-            this.sessionCache.set(code, val);
-            if (this.listeners.has(code)) {
-              this.listeners.get(code).forEach((cb) => {
-                try { cb(val); } catch (e) {}
-              });
-            }
-          }
-        });
-      } catch (e) {}
-    }
-
     return () => {
-      if (this.listeners.has(code)) {
-        this.listeners.get(code).delete(callback);
+      if (this.listeners.has(sessionCode)) {
+        this.listeners.get(sessionCode).delete(callback);
       }
-      unsubMqtt();
-      clearInterval(httpsPollInterval);
+      if (cleanupSSE) cleanupSSE();
       window.removeEventListener('storage', storageHandler);
-      window.removeEventListener('focus', onFocus);
     };
   }
 
   /**
-   * GET SESSION (CACHE -> HTTPS PORT 443 -> LOCALSTORAGE -> FIREBASE)
+   * GET SESSION (FIREBASE -> CLOUD RELAY -> LOCALSTORAGE)
    */
   async getSession(sessionCode) {
-    const code = (sessionCode || '').trim().toUpperCase();
-    if (!code) return null;
-
-    let session = this.sessionCache.get(code) || this.getLocalSession(code);
-
-    // Also probe HTTPS Port 443 cloud relay
-    try {
-      const remote = await cloudRead(`TC_PHASE_${code}`);
-      if (remote && remote.phase) {
-        if (!session) {
-          session = {
-            code,
-            title: 'Sesi Pembelajaran Kalor SMP',
-            createdAt: Date.now(),
-            status: remote.phase,
-            currentPhase: remote.phase,
-            phaseStartTime: remote.phaseStartTime,
-            teams: {}
-          };
-        } else {
-          session.currentPhase = remote.phase;
-          session.status = remote.phase;
-          session.phaseStartTime = remote.phaseStartTime;
-        }
-        this.sessionCache.set(code, session);
-        try { localStorage.setItem(`tc_session_${code}`, JSON.stringify(session)); } catch (e) {}
-      }
-    } catch (e) {}
-
-    // Fallback to Firebase RTDB if available
-    if (!session && this.isFirebaseReady && this.db) {
+    // 1. Try Firebase RTDB
+    if (this.isFirebaseReady && this.db) {
       try {
-        const sRef = this.fbRef(this.db, `sessions/${code}`);
+        const sRef = this.fbRef(this.db, `sessions/${sessionCode}`);
         const snap = await this.fbGet(sRef);
         if (snap.exists()) {
-          session = snap.val();
-          this.sessionCache.set(code, session);
+          const val = snap.val();
+          try {
+            localStorage.setItem(`tc_session_${sessionCode}`, JSON.stringify(val));
+          } catch (e) {}
+          return val;
         }
       } catch (e) {}
     }
 
-    return session;
+    // 2. Try Global Cloud Relay (Fetches from Internet Relay for remote devices)
+    const cloudSession = await this.fetchFromCloudRelay(sessionCode);
+    if (cloudSession) {
+      try {
+        localStorage.setItem(`tc_session_${sessionCode}`, JSON.stringify(cloudSession));
+      } catch (e) {}
+      return cloudSession;
+    }
+
+    // 3. Fallback to LocalStorage
+    return this.getLocalSession(sessionCode);
   }
 
   saveTeamSession(sessionCode, teamNumber, teamName) {
-    try {
-      localStorage.setItem('tc_active_team_session', JSON.stringify({
-        sessionCode,
-        teamNumber,
-        teamName,
-        savedAt: Date.now()
-      }));
-    } catch (e) {}
+    const cred = { sessionCode, teamNumber, teamName, savedAt: Date.now() };
+    localStorage.setItem('tc_team_session', JSON.stringify(cred));
   }
 
   getStoredTeamSession() {
     try {
-      const raw = localStorage.getItem('tc_active_team_session');
+      const raw = localStorage.getItem('tc_team_session');
       return raw ? JSON.parse(raw) : null;
     } catch (e) {
       return null;
@@ -789,9 +652,7 @@ class FirebaseService {
   }
 
   clearStoredTeamSession() {
-    try {
-      localStorage.removeItem('tc_active_team_session');
-    } catch (e) {}
+    localStorage.removeItem('tc_team_session');
   }
 }
 

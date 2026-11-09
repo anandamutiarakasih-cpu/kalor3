@@ -98,18 +98,6 @@ class AudioService {
     }, 120);
   }
 
-  playShuffle() {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx) return;
-    for (let i = 0; i < 6; i++) {
-      setTimeout(() => {
-        const freq = 320 + Math.random() * 200;
-        this.playTone(freq, 'sine', 0.04, 0.1, 0.02);
-      }, i * 65);
-    }
-  }
-
   playPhaseTransition() {
     if (this.muted) return;
     this.init();

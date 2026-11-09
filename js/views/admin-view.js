@@ -9,7 +9,7 @@ import { toast } from '../components/notification.js';
 import { exportSessionToCSV } from '../services/export-service.js';
 import { firebaseConfig, ADMIN_CREDENTIALS } from '../config/firebase-config.js';
 
-export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
+export function renderAdminView(container, { onExit }) {
   let activeSessionCode = null;
   let unsubscribe = null;
   let currentSessionData = null;
@@ -90,7 +90,7 @@ export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
           <div class="tc-cockpit-session-box" id="session-box-controls">
             <div class="tc-code-display">
               <span class="tc-code-lbl">KODE SESI SISWA</span>
-              <span class="tc-code-val" id="disp-session-code">MEMUAT...</span>
+              <span class="tc-code-val" id="disp-session-code">BELUM DIBUAT</span>
             </div>
             <div class="tc-code-btn-group">
               <button id="btn-copy-code" class="tc-btn tc-btn-sm tc-btn-outline" title="Salin Kode">📋 Salin</button>
@@ -102,7 +102,7 @@ export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
 
         <!-- Master Phase Controller Bar -->
         <div class="tc-card tc-phase-bar-card">
-          <div class="tc-phase-bar-title">KENDALI FASE PERMAINAN (TERSYNCHRONIZE INSTAN KE SEMUA KELOMPOK)</div>
+          <div class="tc-phase-bar-title">KENDALI FASE PERMAINAN (TERSYNCHRONIZE KE SEMUA KELOMPOK)</div>
           <div class="tc-phase-btn-row">
             <button class="tc-btn tc-btn-phase" data-phase="LOBBY" id="phase-btn-lobby">
               <span class="tc-phase-num">0</span>
@@ -118,24 +118,21 @@ export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
             </button>
             <button class="tc-btn tc-btn-phase" data-phase="GAME2" id="phase-btn-g2">
               <span class="tc-phase-num">2</span>
-              <span>Game 2: Word Scramble (35 Poin)</span>
+              <span>Game 2: Word Scramble</span>
             </button>
             <button class="tc-btn tc-btn-phase" data-phase="GAME3" id="phase-btn-g3">
               <span class="tc-phase-num">3</span>
-              <span>Game 3: Extreme Addition (35 Poin)</span>
+              <span>Game 3: Extreme Addition (120s)</span>
             </button>
             <button class="tc-btn tc-btn-phase gold" data-phase="FINISHED" id="phase-btn-finish">
               <span class="tc-phase-num">🏆</span>
-              <span>Selesai (Buka Leaderboard)</span>
+              <span>Buka Leaderboard</span>
             </button>
           </div>
         </div>
 
         <!-- Quick Tools Bar -->
         <div class="tc-admin-tools-row">
-          <button id="btn-open-leaderboard-screen" class="tc-btn tc-btn-primary" style="background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 0 15px rgba(245, 158, 11, 0.4); font-weight: 800;">
-            <span>🏆 Tampilkan Layar Leaderboard (Podium Juara)</span>
-          </button>
           <button id="btn-export-csv" class="tc-btn tc-btn-secondary">
             <span>📥 Unduh Rekap Hasil (CSV)</span>
           </button>
@@ -150,8 +147,15 @@ export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
         <!-- Live Teams Monitoring Grid (8 Teams) -->
         <div class="tc-admin-monitor-section">
           <div class="tc-monitor-header-row">
-            <h3 class="tc-monitor-title">Live Scoreboard 8 Kelompok</h3>
-            <span class="tc-live-indicator"><span class="tc-pulse-dot"></span> SINKRONISASI AKTIF</span>
+            <div>
+              <h3 class="tc-monitor-title">Live Scoreboard 8 Kelompok</h3>
+              <span class="tc-live-indicator"><span class="tc-pulse-dot"></span> PEMBARUAN OTOMATIS</span>
+            </div>
+            <div class="tc-sort-toggle-group">
+              <span class="tc-sort-label">Urutkan:</span>
+              <button type="button" id="btn-sort-team-num" class="tc-btn tc-btn-sm tc-btn-secondary active" title="Urutkan berdasarkan nomor kelompok 1-8">🔢 No. Kelompok</button>
+              <button type="button" id="btn-sort-score" class="tc-btn tc-btn-sm tc-btn-secondary" title="Urutkan berdasarkan skor tertinggi ke terendah">🏆 Skor Tertinggi</button>
+            </div>
           </div>
 
           <div class="tc-admin-teams-grid" id="admin-teams-grid">
@@ -200,7 +204,6 @@ export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
     const btnExportCSV = dashEl.querySelector('#btn-export-csv');
     const btnSimulate = dashEl.querySelector('#btn-simulate-teams');
     const btnReset = dashEl.querySelector('#btn-reset-session');
-    const btnOpenLb = dashEl.querySelector('#btn-open-leaderboard-screen');
     const dispCode = dashEl.querySelector('#disp-session-code');
 
     // Create Session
@@ -245,25 +248,10 @@ export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
           studentUrl.searchParams.set('db', firebaseConfig.databaseURL);
         }
         navigator.clipboard.writeText(studentUrl.toString()).then(() => {
-          toast.success('Link HP Siswa disalin! Bagikan ke siswa.');
+          toast.success('Link HP Siswa disalin! Bagikan ke grup WhatsApp/kelas.');
         }).catch(() => {
           toast.info(studentUrl.toString());
         });
-      });
-    }
-
-    // Open Leaderboard Screen directly
-    if (btnOpenLb) {
-      btnOpenLb.addEventListener('click', () => {
-        audio.playClick();
-        if (!activeSessionCode) {
-          toast.warning('Buat sesi terlebih dahulu sebelum membuka leaderboard.');
-          return;
-        }
-        if (unsubscribe) unsubscribe();
-        if (onOpenLeaderboard) {
-          onOpenLeaderboard(activeSessionCode);
-        }
       });
     }
 
@@ -277,22 +265,9 @@ export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
         }
         audio.playClick();
         const targetPhase = btn.dataset.phase;
-
         try {
           await firebaseService.setSessionPhase(activeSessionCode, targetPhase);
           toast.success(`Fase sesi dialihkan ke: ${targetPhase}`);
-
-          // If finished, offer to open leaderboard
-          if (targetPhase === 'FINISHED') {
-            setTimeout(() => {
-              if (confirm('Fase sesi telah diubah ke FINISHED. Buka layar Leaderboard (Podium Juara) sekarang?')) {
-                if (unsubscribe) unsubscribe();
-                if (onOpenLeaderboard) {
-                  onOpenLeaderboard(activeSessionCode);
-                }
-              }
-            }, 300);
-          }
         } catch (e) {
           toast.error('Gagal mengalihkan fase: ' + e.message);
         }
@@ -345,33 +320,63 @@ export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
       }
     });
 
-    // Check if there is already a recent session in localStorage
-    let existingCode = null;
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith('tc_session_TC')) {
-          existingCode = key.replace('tc_session_', '');
-          break;
-        }
-      }
-    } catch (e) {}
+    // Scoreboard Sorting Toggle
+    let adminSortBy = 'NUMBER'; // 'NUMBER' | 'SCORE'
+    const btnSortNum = dashEl.querySelector('#btn-sort-team-num');
+    const btnSortScore = dashEl.querySelector('#btn-sort-score');
 
-    if (existingCode) {
-      activeSessionCode = existingCode;
-      dispCode.textContent = activeSessionCode;
-      attachSessionListener(activeSessionCode);
-    } else {
-      btnCreateSession.click();
+    function updateSortButtons() {
+      if (btnSortNum) btnSortNum.classList.toggle('active', adminSortBy === 'NUMBER');
+      if (btnSortScore) btnSortScore.classList.toggle('active', adminSortBy === 'SCORE');
     }
-  }
 
-  let scorePollTimer = null;
+    if (btnSortNum) {
+      btnSortNum.addEventListener('click', () => {
+        audio.playClick();
+        adminSortBy = 'NUMBER';
+        updateSortButtons();
+        reorderGrid();
+      });
+    }
+
+    if (btnSortScore) {
+      btnSortScore.addEventListener('click', () => {
+        audio.playClick();
+        adminSortBy = 'SCORE';
+        updateSortButtons();
+        reorderGrid();
+      });
+    }
+
+    function reorderGrid() {
+      const grid = dashEl.querySelector('#admin-teams-grid');
+      if (!grid) return;
+      const order = [1, 2, 3, 4, 5, 6, 7, 8];
+      const teams = currentSessionData?.teams || {};
+
+      if (adminSortBy === 'SCORE') {
+        order.sort((a, b) => {
+          const ta = teams[`team_${a}`];
+          const tb = teams[`team_${b}`];
+          const totalA = ta?.scores?.total || 0;
+          const totalB = tb?.scores?.total || 0;
+          if (totalB !== totalA) return totalB - totalA;
+          return a - b;
+        });
+      }
+
+      order.forEach((n) => {
+        const card = grid.querySelector(`#admin-team-card-${n}`);
+        if (card) grid.appendChild(card);
+      });
+    }
+
+    // Auto-create initial session if none exists
+    btnCreateSession.click();
+  }
 
   function attachSessionListener(sessionCode) {
     if (unsubscribe) unsubscribe();
-    if (scorePollTimer) clearInterval(scorePollTimer);
-
     unsubscribe = firebaseService.listenToSession(sessionCode, (session) => {
       if (!session) return;
       currentSessionData = session;
@@ -425,65 +430,34 @@ export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
           predEl.textContent = 'Belum Aktif';
         }
       }
-    });
 
-    // Score poll for remote mobile/iPhone clients
-    let isPollingScores = false;
-    scorePollTimer = setInterval(async () => {
-      if (isPollingScores) return;
-      isPollingScores = true;
-      try {
-        const promises = [1, 2, 3, 4, 5, 6, 7, 8].map(async (n) => {
-          const remoteScore = await firebaseService.cloudGetScore(sessionCode, n);
-          if (remoteScore && remoteScore.scores) {
-            if (!currentSessionData) currentSessionData = { teams: {} };
-            if (!currentSessionData.teams) currentSessionData.teams = {};
-            const curTeam = currentSessionData.teams[`team_${n}`] || { number: n, scores: { game1: 0, game2: 0, game3: 0, total: 0 } };
-            const rTotal = remoteScore.scores?.total || 0;
-            const cTotal = curTeam.scores?.total || 0;
-
-            if (rTotal > cTotal || (remoteScore.name && !curTeam.claimed)) {
-              curTeam.name = remoteScore.name || curTeam.name || `Kelompok ${n}`;
-              curTeam.claimed = true;
-              curTeam.scores = { ...curTeam.scores, ...remoteScore.scores };
-              if (remoteScore.progress) curTeam.progress = { ...curTeam.progress, ...remoteScore.progress };
-              if (remoteScore.predicate) curTeam.predicate = remoteScore.predicate;
-              currentSessionData.teams[`team_${n}`] = curTeam;
-
-              const card = container.querySelector(`#admin-team-card-${n}`);
-              if (card) {
-                card.classList.add('active-team');
-                const badgeEl = container.querySelector(`#atc-badge-${n}`);
-                const nameEl = container.querySelector(`#atc-name-${n}`);
-                const g1El = container.querySelector(`#atc-g1-${n}`);
-                const g2El = container.querySelector(`#atc-g2-${n}`);
-                const g3El = container.querySelector(`#atc-g3-${n}`);
-                const totalEl = container.querySelector(`#atc-total-${n}`);
-                const predEl = container.querySelector(`#atc-pred-${n}`);
-
-                if (badgeEl) { badgeEl.className = 'tc-atc-badge online'; badgeEl.textContent = 'ONLINE'; }
-                if (nameEl) nameEl.textContent = curTeam.name;
-                if (g1El) g1El.textContent = curTeam.scores?.game1 || 0;
-                if (g2El) g2El.textContent = curTeam.scores?.game2 || 0;
-                if (g3El) g3El.textContent = curTeam.scores?.game3 || 0;
-                if (totalEl) totalEl.textContent = curTeam.scores?.total || 0;
-                if (predEl) predEl.textContent = curTeam.predicate || 'Temperature Rookie';
-              }
-            }
-          }
+      // Re-order cards according to active sort setting
+      const grid = container.querySelector('#admin-teams-grid');
+      const sortBtnScore = container.querySelector('#btn-sort-score');
+      const isScoreSort = sortBtnScore?.classList.contains('active');
+      if (grid) {
+        const order = [1, 2, 3, 4, 5, 6, 7, 8];
+        if (isScoreSort) {
+          order.sort((a, b) => {
+            const ta = teams[`team_${a}`];
+            const tb = teams[`team_${b}`];
+            const totalA = ta?.scores?.total || 0;
+            const totalB = tb?.scores?.total || 0;
+            if (totalB !== totalA) return totalB - totalA;
+            return a - b;
+          });
+        }
+        order.forEach((n) => {
+          const card = grid.querySelector(`#admin-team-card-${n}`);
+          if (card) grid.appendChild(card);
         });
-        await Promise.all(promises);
-      } catch (e) {
-      } finally {
-        isPollingScores = false;
       }
-    }, 1500);
+    });
   }
 
   return {
     destroy: () => {
       if (unsubscribe) unsubscribe();
-      if (scorePollTimer) clearInterval(scorePollTimer);
     }
   };
 }

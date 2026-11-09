@@ -19,21 +19,17 @@ export async function renderRegisterView(container, { sessionCode, onRegistered,
     </div>
   `;
 
-  // Fetch session with fast fallback
+  // Fetch session with retry for mobile networks
   let session = await firebaseService.getSession(sessionCode);
   if (!session) {
-    await new Promise((r) => setTimeout(r, 600));
+    await new Promise((r) => setTimeout(r, 1000));
     session = await firebaseService.getSession(sessionCode);
   }
 
   if (!session) {
-    session = {
-      code: sessionCode,
-      title: 'Sesi Pembelajaran Kalor SMP',
-      status: 'LOBBY',
-      currentPhase: 'LOBBY',
-      teams: {}
-    };
+    toast.error(`Sesi ${sessionCode} belum ditemukan. Pastikan Guru telah membuat sesi.`);
+    if (onBack) onBack();
+    return;
   }
 
   const existingTeams = session.teams || {};

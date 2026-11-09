@@ -288,35 +288,4 @@
     height: 38px;
     font-size: 1.05rem;
   }
-
-  /* Game 1 Clash of Champions Mobile Adjustments */
-  .tc-g1-intro-card {
-    padding: 1.25rem 1rem;
-  }
-
-  .tc-g1-title {
-    font-size: 1.6rem;
-  }
-
-  .tc-clash-card,
-  .tc-card-inner {
-    min-height: 380px;
-  }
-
-  .tc-drop-slot {
-    min-height: 380px;
-    padding: 0.5rem;
-  }
-
-  .tc-score-hero-box {
-    padding: 1.25rem 1.5rem;
-  }
-
-  .tc-score-big-val {
-    font-size: 3rem;
-  }
-
-  .tc-result-card {
-    padding: 1.5rem 1rem;
-  }
 }
