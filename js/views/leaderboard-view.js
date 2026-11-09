@@ -232,39 +232,49 @@ export function renderLeaderboardView(container, { sessionCode, teamNumber, onHo
     `;
 
     // Render Table Body
-    tableBody.innerHTML = teams.map((t) => {
-      const pred = getPredicate(t.scores?.total || 0);
-      const isMyTeam = teamNumber && t.number === parseInt(teamNumber, 10);
-      const membersStr = (t.members || []).map((m) => `${m.name} (${m.absen})`).join(', ');
-      const rankNum = t.displayRank || 1;
-      const rankBadge = rankNum === 1 ? '🥇 1' : rankNum === 2 ? '🥈 2' : rankNum === 3 ? '🥉 3' : `${rankNum}`;
-
-      return `
-        <tr class="${isMyTeam ? 'highlight-my-team' : ''}">
-          <td class="tc-col-rank">
-            <span class="tc-rank-badge ${rankNum <= 3 ? `rank-${rankNum}` : ''}">
-              ${rankBadge}
-            </span>
-          </td>
-          <td class="tc-col-name">
-            <strong>${t.name || `Kelompok ${t.number}`}</strong>
-            <small>Kelompok ${t.number}</small>
-          </td>
-          <td class="tc-col-members">${membersStr || '-'}</td>
-          <td class="tc-col-num">${t.scores?.game1 || 0}</td>
-          <td class="tc-col-num">${t.scores?.game2 || 0}</td>
-          <td class="tc-col-num">${t.scores?.game3 || 0}</td>
-          <td class="tc-col-total">
-            <strong>${t.scores?.total || 0}</strong>
-          </td>
-          <td class="tc-col-pred">
-            <span class="tc-pred-pill" style="border-color: ${pred.color}; color: ${pred.color};">
-              ${pred.badge} ${pred.title}
-            </span>
+    if (teams.length === 0) {
+      tableBody.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align: center; padding: 2.5rem 1rem; color: #94a3b8; font-size: 0.95rem;">
+            ⏳ Belum ada skor kelompok yang masuk. Data nilai akan muncul secara otomatis saat tersinkronisasi.
           </td>
         </tr>
       `;
-    }).join('');
+    } else {
+      tableBody.innerHTML = teams.map((t) => {
+        const pred = getPredicate(t.scores?.total || 0);
+        const isMyTeam = teamNumber && t.number === parseInt(teamNumber, 10);
+        const membersStr = (t.members || []).map((m) => `${m.name} (${m.absen})`).join(', ');
+        const rankNum = t.displayRank || 1;
+        const rankBadge = rankNum === 1 ? '🥇 1' : rankNum === 2 ? '🥈 2' : rankNum === 3 ? '🥉 3' : `${rankNum}`;
+
+        return `
+          <tr class="${isMyTeam ? 'highlight-my-team' : ''}">
+            <td class="tc-col-rank">
+              <span class="tc-rank-badge ${rankNum <= 3 ? `rank-${rankNum}` : ''}">
+                ${rankBadge}
+              </span>
+            </td>
+            <td class="tc-col-name">
+              <strong>${t.name || `Kelompok ${t.number}`}</strong>
+              <small>Kelompok ${t.number}</small>
+            </td>
+            <td class="tc-col-members">${membersStr || '-'}</td>
+            <td class="tc-col-num">${t.scores?.game1 || 0}</td>
+            <td class="tc-col-num">${t.scores?.game2 || 0}</td>
+            <td class="tc-col-num">${t.scores?.game3 || 0}</td>
+            <td class="tc-col-total">
+              <strong>${t.scores?.total || 0}</strong>
+            </td>
+            <td class="tc-col-pred">
+              <span class="tc-pred-pill" style="border-color: ${pred.color}; color: ${pred.color};">
+                ${pred.badge} ${pred.title}
+              </span>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
   });
 
   function cleanup() {

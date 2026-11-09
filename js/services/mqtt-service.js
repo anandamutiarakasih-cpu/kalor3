@@ -15,6 +15,7 @@ class MqttRelayService {
     this.ws = null;
     this.connected = false;
     this.subscribers = new Map(); // topic -> Set of callbacks
+    this.lastMessages = new Map(); // topic -> last received message payload
     this.reconnectTimer = null;
     this.pingTimer = null;
     this.encoder = new TextEncoder();
@@ -106,12 +107,21 @@ class MqttRelayService {
             offset += 2;
             const topic = this.decoder.decode(buf.slice(offset, offset + topicLen));
             offset += topicLen;
+
+            // Skip 2-byte Packet Identifier if QoS > 0
+            const qos = (buf[0] >> 1) & 0x03;
+            if (qos > 0) {
+              offset += 2;
+            }
+
             const payloadStr = this.decoder.decode(buf.slice(offset));
 
             let parsedData = payloadStr;
             try {
               parsedData = JSON.parse(payloadStr);
             } catch (e) {}
+
+            this.lastMessages.set(topic, parsedData);
 
             if (this.subscribers.has(topic)) {
               this.subscribers.get(topic).forEach((cb) => {
@@ -179,6 +189,13 @@ class MqttRelayService {
     }
     this.subscribers.get(topic).add(callback);
 
+    // If cached retained message is already present, trigger immediately
+    if (this.lastMessages.has(topic)) {
+      try {
+        callback(this.lastMessages.get(topic));
+      } catch (err) {}
+    }
+
     return () => {
       if (this.subscribers.has(topic)) {
         this.subscribers.get(topic).delete(callback);
@@ -187,6 +204,35 @@ class MqttRelayService {
         }
       }
     };
+  }
+
+  getLastMessage(topic) {
+    return this.lastMessages.get(topic) || null;
+  }
+
+  async waitForMessage(topic, timeoutMs = 1500) {
+    if (this.lastMessages.has(topic)) {
+      return this.lastMessages.get(topic);
+    }
+    return new Promise((resolve) => {
+      let resolved = false;
+      const tid = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          unsub();
+          resolve(null);
+        }
+      }, timeoutMs);
+
+      const unsub = this.subscribe(topic, (data) => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(tid);
+          unsub();
+          resolve(data);
+        }
+      });
+    });
   }
 
   publish(topic, data, retain = true) {

@@ -8,28 +8,45 @@ import { audio } from '../services/audio-service.js';
 import { toast } from '../components/notification.js';
 
 export async function renderRegisterView(container, { sessionCode, onRegistered, onBack }) {
+  const cleanCode = (sessionCode || '').trim().toUpperCase();
+
   // Show pleasant loading state while connecting to cloud session
   container.innerHTML = `
     <div class="tc-view tc-register-view">
       <div class="tc-card" style="text-align: center; max-width: 480px; margin: 4rem auto; padding: 2.5rem 1.5rem;">
         <div class="tc-radar-spinner" style="margin: 0 auto 1.5rem auto; width: 42px; height: 42px;"></div>
-        <h3 style="font-size: 1.3rem; margin-bottom: 0.4rem;">Menghubungkan ke Sesi ${sessionCode}...</h3>
+        <h3 style="font-size: 1.3rem; margin-bottom: 0.4rem;">Menghubungkan ke Sesi ${cleanCode}...</h3>
         <p style="color: #94a3b8; font-size: 0.88rem;">Menyinkronkan data ruangan kelas dari server online...</p>
       </div>
     </div>
   `;
 
   // Fetch session with retry for mobile networks
-  let session = await firebaseService.getSession(sessionCode);
+  let session = await firebaseService.getSession(cleanCode);
   if (!session) {
-    await new Promise((r) => setTimeout(r, 1000));
-    session = await firebaseService.getSession(sessionCode);
+    await new Promise((r) => setTimeout(r, 600));
+    session = await firebaseService.getSession(cleanCode);
   }
 
+  // If session is still null, but sessionCode has valid format, create optimistic session
   if (!session) {
-    toast.error(`Sesi ${sessionCode} belum ditemukan. Pastikan Guru telah membuat sesi.`);
-    if (onBack) onBack();
-    return;
+    if (/^TC[A-Z0-9]{4}$/i.test(cleanCode)) {
+      session = {
+        code: cleanCode,
+        status: 'LOBBY',
+        currentPhase: 'LOBBY',
+        phaseStartTime: null,
+        phaseDuration: 0,
+        teams: {}
+      };
+      try {
+        localStorage.setItem(`tc_session_${cleanCode}`, JSON.stringify(session));
+      } catch (e) {}
+    } else {
+      toast.error(`Format kode sesi "${sessionCode}" tidak valid. Pastikan diawali TC diikuti 4 karakter (contoh: TC4829).`);
+      if (onBack) onBack();
+      return;
+    }
   }
 
   const existingTeams = session.teams || {};
@@ -227,9 +244,9 @@ export async function renderRegisterView(container, { sessionCode, onRegistered,
     submitBtn.textContent = 'Mendaftarkan...';
 
     try {
-      await firebaseService.joinSession(sessionCode, selectedNumber, teamName, members);
+      await firebaseService.joinSession(cleanCode, selectedNumber, teamName, members);
       toast.success(`Berhasil bergabung sebagai Kelompok ${selectedNumber}!`);
-      if (onRegistered) onRegistered(sessionCode, selectedNumber);
+      if (onRegistered) onRegistered(cleanCode, selectedNumber);
     } catch (err) {
       toast.error(err.message || 'Gagal mendaftar ke sesi.');
       submitBtn.disabled = false;
