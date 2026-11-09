@@ -108,9 +108,13 @@ export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
               <span class="tc-phase-num">0</span>
               <span>Lobi Persiapan</span>
             </button>
-            <button class="tc-btn tc-btn-phase" data-phase="GAME1" id="phase-btn-g1">
-              <span class="tc-phase-num">1</span>
-              <span>Game 1: Shuffle & Recall (100 Poin)</span>
+            <button class="tc-btn tc-btn-phase" data-phase="GAME1_MEMORIZE" id="phase-btn-g1-mem">
+              <span class="tc-phase-num">1A</span>
+              <span>Game 1: Menghafal (35s)</span>
+            </button>
+            <button class="tc-btn tc-btn-phase" data-phase="GAME1_PLAY" id="phase-btn-g1-play">
+              <span class="tc-phase-num">1B</span>
+              <span>Game 1: Susun & Cocokkan (75s)</span>
             </button>
             <button class="tc-btn tc-btn-phase" data-phase="GAME2" id="phase-btn-g2">
               <span class="tc-phase-num">2</span>
@@ -162,7 +166,7 @@ export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
 
                 <div class="tc-atc-scores">
                   <div class="tc-score-col">
-                    <span class="tc-sc-lbl">G1 (100)</span>
+                    <span class="tc-sc-lbl">G1 (30)</span>
                     <strong class="tc-sc-val" id="atc-g1-${n}">0</strong>
                   </div>
                   <div class="tc-score-col">
@@ -362,8 +366,12 @@ export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
     }
   }
 
+  let scorePollTimer = null;
+
   function attachSessionListener(sessionCode) {
     if (unsubscribe) unsubscribe();
+    if (scorePollTimer) clearInterval(scorePollTimer);
+
     unsubscribe = firebaseService.listenToSession(sessionCode, (session) => {
       if (!session) return;
       currentSessionData = session;
@@ -371,9 +379,7 @@ export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
       // Update Phase Buttons active state
       const curPhase = session.currentPhase || 'LOBBY';
       container.querySelectorAll('.tc-btn-phase').forEach((btn) => {
-        const p = btn.dataset.phase;
-        const isActive = p === curPhase || (p === 'GAME1' && (curPhase === 'GAME1_PLAY' || curPhase === 'GAME1_MEMORIZE'));
-        btn.classList.toggle('active', isActive);
+        btn.classList.toggle('active', btn.dataset.phase === curPhase);
       });
 
       // Update 8 Teams Cards
@@ -420,11 +426,64 @@ export function renderAdminView(container, { onExit, onOpenLeaderboard }) {
         }
       }
     });
+
+    // Score poll for remote mobile/iPhone clients
+    let isPollingScores = false;
+    scorePollTimer = setInterval(async () => {
+      if (isPollingScores) return;
+      isPollingScores = true;
+      try {
+        const promises = [1, 2, 3, 4, 5, 6, 7, 8].map(async (n) => {
+          const remoteScore = await firebaseService.cloudGetScore(sessionCode, n);
+          if (remoteScore && remoteScore.scores) {
+            if (!currentSessionData) currentSessionData = { teams: {} };
+            if (!currentSessionData.teams) currentSessionData.teams = {};
+            const curTeam = currentSessionData.teams[`team_${n}`] || { number: n, scores: { game1: 0, game2: 0, game3: 0, total: 0 } };
+            const rTotal = remoteScore.scores?.total || 0;
+            const cTotal = curTeam.scores?.total || 0;
+
+            if (rTotal > cTotal || (remoteScore.name && !curTeam.claimed)) {
+              curTeam.name = remoteScore.name || curTeam.name || `Kelompok ${n}`;
+              curTeam.claimed = true;
+              curTeam.scores = { ...curTeam.scores, ...remoteScore.scores };
+              if (remoteScore.progress) curTeam.progress = { ...curTeam.progress, ...remoteScore.progress };
+              if (remoteScore.predicate) curTeam.predicate = remoteScore.predicate;
+              currentSessionData.teams[`team_${n}`] = curTeam;
+
+              const card = container.querySelector(`#admin-team-card-${n}`);
+              if (card) {
+                card.classList.add('active-team');
+                const badgeEl = container.querySelector(`#atc-badge-${n}`);
+                const nameEl = container.querySelector(`#atc-name-${n}`);
+                const g1El = container.querySelector(`#atc-g1-${n}`);
+                const g2El = container.querySelector(`#atc-g2-${n}`);
+                const g3El = container.querySelector(`#atc-g3-${n}`);
+                const totalEl = container.querySelector(`#atc-total-${n}`);
+                const predEl = container.querySelector(`#atc-pred-${n}`);
+
+                if (badgeEl) { badgeEl.className = 'tc-atc-badge online'; badgeEl.textContent = 'ONLINE'; }
+                if (nameEl) nameEl.textContent = curTeam.name;
+                if (g1El) g1El.textContent = curTeam.scores?.game1 || 0;
+                if (g2El) g2El.textContent = curTeam.scores?.game2 || 0;
+                if (g3El) g3El.textContent = curTeam.scores?.game3 || 0;
+                if (totalEl) totalEl.textContent = curTeam.scores?.total || 0;
+                if (predEl) predEl.textContent = curTeam.predicate || 'Temperature Rookie';
+              }
+            }
+          }
+        });
+        await Promise.all(promises);
+      } catch (e) {
+      } finally {
+        isPollingScores = false;
+      }
+    }, 1500);
   }
 
   return {
     destroy: () => {
       if (unsubscribe) unsubscribe();
+      if (scorePollTimer) clearInterval(scorePollTimer);
     }
   };
 }

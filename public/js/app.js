@@ -126,8 +126,10 @@ class ThermoChampionsApp {
         break;
       case 'GAME1':
       case 'GAME1_MEMORIZE':
+        this.navigate('game1_memorize');
+        break;
       case 'GAME1_PLAY':
-        this.navigate('game1');
+        this.navigate('game1_play');
         break;
       case 'GAME2':
         this.navigate('game2');
@@ -201,15 +203,23 @@ class ThermoChampionsApp {
         });
         break;
 
-      case 'game1':
       case 'game1_memorize':
+        this.currentViewInstance = renderGame1View(this.appContainer, {
+          sessionCode: this.state.sessionCode,
+          teamNumber: this.state.teamNumber,
+          isMemorizePhase: true,
+          onPhaseChange: (newPhase) => {
+            this.routeByPhase(newPhase);
+          }
+        });
+        break;
+
+      case 'game1':
       case 'game1_play':
         this.currentViewInstance = renderGame1View(this.appContainer, {
           sessionCode: this.state.sessionCode,
           teamNumber: this.state.teamNumber,
-          onNextGame: () => {
-            this.navigate('game2');
-          },
+          isMemorizePhase: false,
           onPhaseChange: (newPhase) => {
             this.routeByPhase(newPhase);
           }

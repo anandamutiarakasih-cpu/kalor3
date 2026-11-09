@@ -5,6 +5,7 @@
 
 import { firebaseService } from '../services/firebase-service.js';
 import { audio } from '../services/audio-service.js';
+import { toast } from '../components/notification.js';
 
 export function renderWaitingView(container, { sessionCode, teamNumber, onPhaseChange }) {
   let unsubscribe = null;
@@ -74,11 +75,16 @@ export function renderWaitingView(container, { sessionCode, teamNumber, onPhaseC
         const p = s?.currentPhase || s?.status;
         if (p && p !== 'LOBBY') {
           audio.playPhaseTransition();
+          toast.success(`Guru telah memulai sesi (${p})! Membuka permainan...`);
           if (unsubscribe) unsubscribe();
           if (onPhaseChange) onPhaseChange(p, s);
           return;
+        } else {
+          toast.info('Guru masih berada di Lobi Persiapan. Bersiaplah!');
         }
-      } catch (e) {}
+      } catch (e) {
+        toast.warning('Sedang menghubungkan ke server guru...');
+      }
       setTimeout(() => {
         btnCheck.disabled = false;
         btnCheck.innerHTML = `<span>🔄 Periksa Status Mulai dari Guru</span>`;
