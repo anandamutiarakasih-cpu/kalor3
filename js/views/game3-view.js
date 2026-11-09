@@ -191,7 +191,12 @@ export function renderGame3View(container, { sessionCode, teamNumber, onGameComp
           remainingSec
         );
 
-        totalScoreG3 = res.totalGame3Score;
+        if (res && typeof res.totalGame3Score === 'number') {
+          totalScoreG3 = res.totalGame3Score;
+        } else if (res && res.correct) {
+          totalScoreG3 += (res.addedScore || 3.5);
+        }
+        totalScoreG3 = Math.min(35, Math.round(totalScoreG3 * 10) / 10);
         const dispG3 = container.querySelector('#disp-g3-score');
         if (dispG3) dispG3.textContent = totalScoreG3.toFixed(1);
 

@@ -236,13 +236,14 @@ class FirebaseService {
 
       const phaseObj = await cloudRead(`TC_PHASE_${code}`);
       if (phaseObj && phaseObj.phase) {
+        const local = this.getLocalSession(code);
         return {
           code,
           status: phaseObj.phase,
           currentPhase: phaseObj.phase,
           phaseStartTime: phaseObj.phaseStartTime,
           phaseDuration: phaseObj.phaseDuration || 0,
-          teams: {}
+          teams: (local && local.teams) ? local.teams : {}
         };
       }
     } catch (err) {
@@ -498,33 +499,63 @@ class FirebaseService {
    * SUBMIT GAME 1 (Shuffle & Recall)
    */
   async submitGame1(sessionCode, teamNumber, userAnswers) {
-    const session = await this.getSession(sessionCode);
-    if (!session || !session.teams || !session.teams[`team_${teamNumber}`]) {
-      throw new Error('Data kelompok tidak ditemukan.');
+    let session = await this.getSession(sessionCode);
+    if (!session) session = this.getLocalSession(sessionCode) || { code: sessionCode, teams: {} };
+    if (!session.teams) session.teams = {};
+    const tKey = `team_${teamNumber}`;
+
+    // Auto-rehydrate team if missing (e.g. from spotty network join)
+    if (!session.teams[tKey]) {
+      const stored = this.getStoredTeamSession();
+      session.teams[tKey] = {
+        number: parseInt(teamNumber, 10),
+        name: stored?.teamName || `Kelompok ${teamNumber}`,
+        members: [],
+        claimed: true,
+        scores: { game1: 0, game2: 0, game3: 0, total: 0 },
+        progress: { game1Submitted: false, game2Index: 0, game3Index: 0 },
+        predicate: 'Temperature Rookie'
+      };
     }
 
-    const team = session.teams[`team_${teamNumber}`];
-    if (team.progress?.game1Submitted) {
-      return { success: false, message: 'Game 1 sudah dikirim sebelumnya.' };
+    const team = session.teams[tKey];
+    if (!team.scores) team.scores = { game1: 0, game2: 0, game3: 0, total: 0 };
+    if (!team.progress) team.progress = {};
+
+    // If already submitted and score is already present, return the calculated score (never undefined!)
+    if (team.progress.game1Submitted && typeof team.scores.game1 === 'number') {
+      const existingScore = team.scores.game1;
+      return {
+        success: true,
+        score: existingScore,
+        totalGame1Score: existingScore,
+        correctCount: existingScore >= 30 ? 10 : Math.round(existingScore / 2.5),
+        totalItems: SHUFFLE_CHALLENGES.length,
+        isPerfect: existingScore >= 30,
+        alreadySubmitted: true
+      };
     }
 
     let correctCount = 0;
+    const safeAnswers = userAnswers || {};
     for (const challenge of SHUFFLE_CHALLENGES) {
-      const ans = (userAnswers[challenge.id] || '').trim();
-      if (ans.toLowerCase() === challenge.correctAnswer.toLowerCase()) {
+      const userAns = (safeAnswers[challenge.id] || '').trim();
+      const targetAns = (challenge.correctAnswer || '').trim();
+      if (userAns && targetAns && userAns.toLowerCase() === targetAns.toLowerCase()) {
         correctCount++;
       }
     }
 
     let score = correctCount * 2.5;
     if (correctCount === SHUFFLE_CHALLENGES.length) {
-      score += 5; // Perfect 10/10 bonus
+      score += 5; // Perfect 10/10 bonus = 30 pts
     }
     score = Math.min(30, Math.round(score * 10) / 10);
 
     team.scores.game1 = score;
-    team.scores.total = Math.min(100, Math.round((team.scores.game1 + (team.scores.game2 || 0) + (team.scores.game3 || 0)) * 10) / 10);
-    team.predicate = getPredicate(team.scores.total).title;
+    team.scores.total = Math.min(100, Math.round((score + (team.scores.game2 || 0) + (team.scores.game3 || 0)) * 10) / 10);
+    const predObj = getPredicate(team.scores.total);
+    team.predicate = predObj?.title || predObj || 'Temperature Rookie';
     team.progress.game1Submitted = true;
 
     if (this.isFirebaseReady && this.db) {
@@ -541,10 +572,12 @@ class FirebaseService {
 
     this.notifySessionUpdate(sessionCode, session);
     this.cloudSyncTeamScore(sessionCode, teamNumber, team);
+
     return {
       success: true,
-      score,
-      correctCount,
+      score: score,
+      totalGame1Score: score,
+      correctCount: correctCount,
       totalItems: SHUFFLE_CHALLENGES.length,
       isPerfect: correctCount === SHUFFLE_CHALLENGES.length
     };
@@ -554,14 +587,38 @@ class FirebaseService {
    * SUBMIT GAME 2 SINGLE WORD
    */
   async submitGame2Word(sessionCode, teamNumber, itemId, answer, remainingSec = 0) {
-    const session = await this.getSession(sessionCode);
-    if (!session || !session.teams || !session.teams[`team_${teamNumber}`]) {
-      throw new Error('Data kelompok tidak ditemukan.');
+    let session = await this.getSession(sessionCode);
+    if (!session) session = this.getLocalSession(sessionCode) || { code: sessionCode, teams: {} };
+    if (!session.teams) session.teams = {};
+    const tKey = `team_${teamNumber}`;
+
+    if (!session.teams[tKey]) {
+      const stored = this.getStoredTeamSession();
+      session.teams[tKey] = {
+        number: parseInt(teamNumber, 10),
+        name: stored?.teamName || `Kelompok ${teamNumber}`,
+        members: [],
+        claimed: true,
+        scores: { game1: 0, game2: 0, game3: 0, total: 0 },
+        progress: { game2Index: 0 },
+        predicate: 'Temperature Rookie'
+      };
     }
 
-    const team = session.teams[`team_${teamNumber}`];
+    const team = session.teams[tKey];
+    if (!team.scores) team.scores = { game1: 0, game2: 0, game3: 0, total: 0 };
+    const currentG2 = team.scores.game2 || 0;
+
     const item = WORD_SCRAMBLE_ITEMS.find((w) => w.id === itemId);
-    if (!item) return { correct: false, score: 0 };
+    if (!item) {
+      return {
+        success: false,
+        correct: false,
+        addedScore: 0,
+        totalGame2Score: currentG2,
+        expected: ''
+      };
+    }
 
     const cleanUser = (answer || '').replace(/\s+/g, '').toUpperCase();
     const cleanTarget = item.answer.replace(/\s+/g, '').toUpperCase();
@@ -577,12 +634,11 @@ class FirebaseService {
       addedScore = Math.round(addedScore * 10) / 10;
     }
 
-    const currentG2 = team.scores?.game2 || 0;
     const newG2 = Math.min(35, Math.round((currentG2 + addedScore) * 10) / 10);
-
     team.scores.game2 = newG2;
     team.scores.total = Math.min(100, Math.round(((team.scores.game1 || 0) + newG2 + (team.scores.game3 || 0)) * 10) / 10);
-    team.predicate = getPredicate(team.scores.total).title;
+    const predObj = getPredicate(team.scores.total);
+    team.predicate = predObj?.title || predObj || 'Temperature Rookie';
 
     if (this.isFirebaseReady && this.db) {
       try {
@@ -597,6 +653,7 @@ class FirebaseService {
 
     this.notifySessionUpdate(sessionCode, session);
     this.cloudSyncTeamScore(sessionCode, teamNumber, team);
+
     return {
       success: true,
       correct: isCorrect,
@@ -610,14 +667,39 @@ class FirebaseService {
    * SUBMIT GAME 3 CALCULATION
    */
   async submitGame3Calculation(sessionCode, teamNumber, itemId, rawAnswer, remainingSec = 0) {
-    const session = await this.getSession(sessionCode);
-    if (!session || !session.teams || !session.teams[`team_${teamNumber}`]) {
-      throw new Error('Data kelompok tidak ditemukan.');
+    let session = await this.getSession(sessionCode);
+    if (!session) session = this.getLocalSession(sessionCode) || { code: sessionCode, teams: {} };
+    if (!session.teams) session.teams = {};
+    const tKey = `team_${teamNumber}`;
+
+    if (!session.teams[tKey]) {
+      const stored = this.getStoredTeamSession();
+      session.teams[tKey] = {
+        number: parseInt(teamNumber, 10),
+        name: stored?.teamName || `Kelompok ${teamNumber}`,
+        members: [],
+        claimed: true,
+        scores: { game1: 0, game2: 0, game3: 0, total: 0 },
+        progress: { game3Index: 0 },
+        predicate: 'Temperature Rookie'
+      };
     }
 
-    const team = session.teams[`team_${teamNumber}`];
+    const team = session.teams[tKey];
+    if (!team.scores) team.scores = { game1: 0, game2: 0, game3: 0, total: 0 };
+    const currentG3 = team.scores.game3 || 0;
+
     const item = HEAT_CALCULATION_ITEMS.find((h) => h.id === itemId);
-    if (!item) return { correct: false, score: 0 };
+    if (!item) {
+      return {
+        success: false,
+        correct: false,
+        addedScore: 0,
+        totalGame3Score: currentG3,
+        expected: 0,
+        explanation: ''
+      };
+    }
 
     let rawStr = String(rawAnswer || '').trim();
     // Strip common scientific unit suffixes like "Joule", "J", "J/kg°C", "°C", "kg"
@@ -646,12 +728,11 @@ class FirebaseService {
       addedScore = Math.round(addedScore * 10) / 10;
     }
 
-    const currentG3 = team.scores?.game3 || 0;
     const newG3 = Math.min(35, Math.round((currentG3 + addedScore) * 10) / 10);
-
     team.scores.game3 = newG3;
     team.scores.total = Math.min(100, Math.round(((team.scores.game1 || 0) + (team.scores.game2 || 0) + newG3) * 10) / 10);
-    team.predicate = getPredicate(team.scores.total).title;
+    const predObj = getPredicate(team.scores.total);
+    team.predicate = predObj?.title || predObj || 'Temperature Rookie';
 
     if (this.isFirebaseReady && this.db) {
       try {
@@ -666,6 +747,7 @@ class FirebaseService {
 
     this.notifySessionUpdate(sessionCode, session);
     this.cloudSyncTeamScore(sessionCode, teamNumber, team);
+
     return {
       success: true,
       correct: isCorrect,
@@ -828,34 +910,49 @@ class FirebaseService {
 
   /**
    * GET SESSION (FIREBASE -> CLOUD RELAY -> LOCALSTORAGE)
+   * Merges incoming updates with local team state to ensure team scores & progress are never lost
    */
   async getSession(sessionCode) {
+    const code = (sessionCode || '').trim().toUpperCase();
+    if (!code) return null;
+    const local = this.getLocalSession(code);
+
     // 1. Try Firebase RTDB
     if (this.isFirebaseReady && this.db) {
       try {
-        const sRef = this.fbRef(this.db, `sessions/${sessionCode}`);
+        const sRef = this.fbRef(this.db, `sessions/${code}`);
         const snap = await this.fbGet(sRef);
         if (snap.exists()) {
           const val = snap.val();
+          const merged = this.mergeSessionData(local, val);
           try {
-            localStorage.setItem(`tc_session_${sessionCode}`, JSON.stringify(val));
+            localStorage.setItem(`tc_session_${code}`, JSON.stringify(merged));
           } catch (e) {}
-          return val;
+          return merged;
         }
       } catch (e) {}
     }
 
     // 2. Try Global Cloud Relay (Fetches from Internet Relay for remote devices)
-    const cloudSession = await this.fetchFromCloudRelay(sessionCode);
+    const cloudSession = await this.fetchFromCloudRelay(code);
     if (cloudSession) {
+      const merged = this.mergeSessionData(local, cloudSession);
       try {
-        localStorage.setItem(`tc_session_${sessionCode}`, JSON.stringify(cloudSession));
+        localStorage.setItem(`tc_session_${code}`, JSON.stringify(merged));
       } catch (e) {}
-      return cloudSession;
+      return merged;
     }
 
     // 3. Fallback to LocalStorage
-    return this.getLocalSession(sessionCode);
+    return local;
+  }
+
+  mergeSessionData(local, incoming) {
+    if (!local) return incoming;
+    if (!incoming) return local;
+    const merged = { ...local, ...incoming };
+    merged.teams = { ...(local.teams || {}), ...(incoming.teams || {}) };
+    return merged;
   }
 
   saveTeamSession(sessionCode, teamNumber, teamName) {

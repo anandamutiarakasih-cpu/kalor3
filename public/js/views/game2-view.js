@@ -592,7 +592,12 @@ export function renderGame2View(container, { sessionCode, teamNumber, onGameComp
           remainingSec
         );
 
-        totalScoreG2 = res.totalGame2Score;
+        if (res && typeof res.totalGame2Score === 'number') {
+          totalScoreG2 = res.totalGame2Score;
+        } else if (res && res.correct) {
+          totalScoreG2 += (res.addedScore || 3.0);
+        }
+        totalScoreG2 = Math.min(35, Math.round(totalScoreG2 * 10) / 10);
         const dispG2 = container.querySelector('#disp-g2-score');
         if (dispG2) dispG2.textContent = totalScoreG2.toFixed(1);
 
