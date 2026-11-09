@@ -145,7 +145,7 @@ class NetworkMonitorService {
 
       const pingUrl = (typeof window !== 'undefined' && window.location && window.location.origin)
         ? `${window.location.origin}${window.location.pathname}?_p=${Date.now()}`
-        : `https://keyvalue.immanuel.co/api/KeyVal/GetValue/vjatsu02/ping`;
+        : `https://ffdawauotorocorlqgsq.supabase.co/rest/v1/`;
 
       const res = await fetch(pingUrl, {
         method: 'HEAD',
