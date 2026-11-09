@@ -134,19 +134,22 @@ class NetworkMonitorService {
     let rtt = 0;
 
     try {
-      // Fast lightweight ping
+      // Fast lightweight ping to own origin or universal Port 443 HTTPS
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2800);
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
 
-      // Attempt to ping ntfy.sh or public timestamp
-      const res = await fetch(`https://ntfy.sh/tc_kalor_ping/json?poll=1&limit=0`, {
-        method: 'GET',
+      const pingUrl = (typeof window !== 'undefined' && window.location && window.location.origin)
+        ? `${window.location.origin}${window.location.pathname}?_p=${Date.now()}`
+        : `https://keyvalue.immanuel.co/api/KeyVal/GetValue/vjatsu02/ping`;
+
+      const res = await fetch(pingUrl, {
+        method: 'HEAD',
         cache: 'no-store',
         signal: controller.signal
       });
       clearTimeout(timeoutId);
       rtt = Math.round(performance.now() - t0);
-      success = res.ok || res.status === 404; // 404 from empty topic is still a valid fast response
+      success = res.ok || res.status < 500;
     } catch (e) {
       // Fallback local calculation
       rtt = Math.round(performance.now() - t0);
