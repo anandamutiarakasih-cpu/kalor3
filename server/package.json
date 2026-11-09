@@ -1,0 +1,25 @@
+{
+  "name": "thermo-champions-multiplayer-server",
+  "version": "2.0.0",
+  "description": "Authoritative Multiplayer WebSocket Server for Thermo Champions (Heat Edition)",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "node tests/multiplayer-simulation.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.43.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.4"
+  }
+}

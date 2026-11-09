@@ -263,8 +263,9 @@ export function renderAdminView(container, { onExit }) {
         }
         const studentUrl = new URL(window.location.origin + window.location.pathname);
         studentUrl.searchParams.set('session', activeSessionCode);
-        if (firebaseConfig && firebaseConfig.databaseURL) {
-          studentUrl.searchParams.set('db', firebaseConfig.databaseURL);
+        const backendUrl = localStorage.getItem('tc_backend_url');
+        if (backendUrl) {
+          studentUrl.searchParams.set('backend', backendUrl);
         }
         navigator.clipboard.writeText(studentUrl.toString()).then(() => {
           toast.success('Link HP Siswa disalin! Bagikan ke grup WhatsApp/kelas.');
