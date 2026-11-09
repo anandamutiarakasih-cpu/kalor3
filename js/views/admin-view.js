@@ -95,6 +95,7 @@ export function renderAdminView(container, { onExit }) {
             <div class="tc-code-btn-group">
               <button id="btn-copy-code" class="tc-btn tc-btn-sm tc-btn-outline" title="Salin Kode">📋 Salin</button>
               <button id="btn-copy-link" class="tc-btn tc-btn-sm tc-btn-secondary" title="Salin Link HP Siswa">🔗 Salin Link HP</button>
+              <button id="btn-open-existing-session" class="tc-btn tc-btn-sm tc-btn-ghost" title="Buka kode sesi yang sudah dibuat sebelumnya">🔍 Buka Sesi</button>
               <button id="btn-create-new-session" class="tc-btn tc-btn-sm tc-btn-primary">+ Sesi Baru</button>
             </div>
           </div>
@@ -199,6 +200,7 @@ export function renderAdminView(container, { onExit }) {
 
     // Hook buttons
     const btnCreateSession = dashEl.querySelector('#btn-create-new-session');
+    const btnOpenSession = dashEl.querySelector('#btn-open-existing-session');
     const btnCopyCode = dashEl.querySelector('#btn-copy-code');
     const btnCopyLink = dashEl.querySelector('#btn-copy-link');
     const btnExportCSV = dashEl.querySelector('#btn-export-csv');
@@ -213,12 +215,29 @@ export function renderAdminView(container, { onExit }) {
         const session = await firebaseService.createSession();
         activeSessionCode = session.code;
         dispCode.textContent = activeSessionCode;
+        localStorage.setItem('tc_admin_active_session', activeSessionCode);
         toast.success(`Sesi ${activeSessionCode} aktif.`);
         attachSessionListener(activeSessionCode);
       } catch (err) {
         toast.error('Gagal membuat sesi: ' + err.message);
       }
     });
+
+    // Open Existing Session
+    if (btnOpenSession) {
+      btnOpenSession.addEventListener('click', () => {
+        audio.playClick();
+        const code = prompt('Masukkan Kode Sesi yang sudah berjalan (contoh: TCABCD):');
+        if (code && code.trim()) {
+          const cleanCode = code.trim().toUpperCase();
+          activeSessionCode = cleanCode;
+          dispCode.textContent = activeSessionCode;
+          localStorage.setItem('tc_admin_active_session', activeSessionCode);
+          toast.success(`Terhubung ke sesi: ${activeSessionCode}`);
+          attachSessionListener(activeSessionCode);
+        }
+      });
+    }
 
     // Copy Code
     btnCopyCode.addEventListener('click', () => {
@@ -371,8 +390,16 @@ export function renderAdminView(container, { onExit }) {
       });
     }
 
-    // Auto-create initial session if none exists
-    btnCreateSession.click();
+    // Restore saved session if exists, otherwise create initial session
+    const savedSession = localStorage.getItem('tc_admin_active_session');
+    if (savedSession) {
+      activeSessionCode = savedSession;
+      dispCode.textContent = activeSessionCode;
+      attachSessionListener(activeSessionCode);
+      toast.info(`Melanjutkan sesi aktif: ${activeSessionCode}`);
+    } else {
+      btnCreateSession.click();
+    }
   }
 
   function attachSessionListener(sessionCode) {
@@ -389,6 +416,8 @@ export function renderAdminView(container, { onExit }) {
 
       // Update 8 Teams Cards
       const teams = session.teams || {};
+      const now = firebaseService.getServerTime();
+
       for (let i = 1; i <= 8; i++) {
         const t = teams[`team_${i}`];
         const card = container.querySelector(`#admin-team-card-${i}`);
@@ -405,9 +434,22 @@ export function renderAdminView(container, { onExit }) {
 
         if (t && t.claimed) {
           card.classList.add('active-team');
-          badgeEl.className = 'tc-atc-badge online';
-          badgeEl.textContent = 'ONLINE';
           nameEl.textContent = t.name || `Kelompok ${i}`;
+
+          const lastSeen = t.heartbeat?.lastSeen || t.joinedAt || 0;
+          const latency = t.heartbeat?.latency || 0;
+          const diffSec = Math.max(0, Math.floor((now - lastSeen) / 1000));
+
+          if (diffSec <= 15) {
+            badgeEl.className = 'tc-atc-badge online';
+            badgeEl.innerHTML = `<span class="tc-pulse-dot green"></span> ONLINE ${latency ? `(${latency}ms)` : ''}`;
+          } else if (diffSec <= 40) {
+            badgeEl.className = 'tc-atc-badge warning';
+            badgeEl.innerHTML = `<span class="tc-pulse-dot yellow"></span> LAG (${diffSec}s)`;
+          } else {
+            badgeEl.className = 'tc-atc-badge offline';
+            badgeEl.innerHTML = `<span class="tc-pulse-dot red"></span> TERPUTUS (${diffSec}s)`;
+          }
 
           const mList = (t.members || []).map((m) => `${m.name} (${m.absen})`).join(', ');
           membersEl.textContent = mList || 'Tanpa anggota';

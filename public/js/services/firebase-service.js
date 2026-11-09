@@ -468,7 +468,10 @@ class FirebaseService {
     const item = HEAT_CALCULATION_ITEMS.find((h) => h.id === itemId);
     if (!item) return { correct: false, score: 0 };
 
-    let clean = String(rawAnswer || '').trim().replace(/\s+/g, '');
+    let rawStr = String(rawAnswer || '').trim();
+    // Strip common scientific unit suffixes like "Joule", "J", "J/kg°C", "°C", "kg"
+    rawStr = rawStr.replace(/(joule|j\/kg°c|j\/°c|j|°c|kg)/gi, '').trim();
+    let clean = rawStr.replace(/\s+/g, '');
     if (/^\d{1,3}(\.\d{3})+$/.test(clean)) {
       clean = clean.replace(/\./g, '');
     } else if (/^\d+,\d+$/.test(clean)) {
@@ -552,7 +555,27 @@ class FirebaseService {
   }
 
   /**
-   * LISTEN TO SESSION IN REALTIME (FIREBASE + CLOUD RELAY + STORAGE)
+   * SEND TEAM HEARTBEAT & LATENCY
+   * Periodically sent by active student devices to indicate online / lag status to Teacher
+   */
+  async sendHeartbeat(sessionCode, teamNumber, latency = 0) {
+    if (!sessionCode || !teamNumber) return;
+    const now = this.getServerTime();
+
+    if (this.isFirebaseReady && this.db) {
+      try {
+        const hbRef = this.fbRef(this.db, `sessions/${sessionCode}/teams/team_${teamNumber}/heartbeat`);
+        await this.fbUpdate(hbRef, {
+          lastSeen: now,
+          latency: latency
+        });
+      } catch (e) {}
+    }
+  }
+
+  /**
+   * LISTEN TO SESSION IN REALTIME (FIREBASE + CLOUD RELAY + STORAGE + SMART POLLING)
+   * Multi-layer redundancy guarantees zero dropped phase changes even on lagging cellular connections
    */
   listenToSession(sessionCode, callback) {
     if (!this.listeners.has(sessionCode)) {
@@ -560,9 +583,19 @@ class FirebaseService {
     }
     this.listeners.get(sessionCode).add(callback);
 
+    let lastKnownPhase = null;
+    let lastKnownTeamsCount = 0;
+
+    const safeNotify = (data) => {
+      if (!data) return;
+      lastKnownPhase = data.currentPhase;
+      lastKnownTeamsCount = Object.keys(data.teams || {}).length;
+      callback(data);
+    };
+
     // Initial load
     this.getSession(sessionCode).then((s) => {
-      if (s) callback(s);
+      if (s) safeNotify(s);
     });
 
     // 1. Firebase Live Listener
@@ -573,6 +606,7 @@ class FirebaseService {
           const val = snap.val();
           if (val) {
             this.notifySessionUpdate(sessionCode, val);
+            safeNotify(val);
           }
         });
       } catch (e) {}
@@ -590,18 +624,45 @@ class FirebaseService {
       if (e.key === `tc_session_${sessionCode}` && e.newValue) {
         try {
           const val = JSON.parse(e.newValue);
-          callback(val);
+          safeNotify(val);
         } catch (err) {}
       }
     };
     window.addEventListener('storage', storageHandler);
+
+    // 4. Smart Polling Fallback (Every 2.5s) to guarantee zero desync if WebSocket or SSE stalls
+    const pollInterval = setInterval(async () => {
+      try {
+        const s = await this.getSession(sessionCode);
+        if (s) {
+          const curTeamsCount = Object.keys(s.teams || {}).length;
+          if (s.currentPhase !== lastKnownPhase || curTeamsCount !== lastKnownTeamsCount) {
+            safeNotify(s);
+          }
+        }
+      } catch (e) {}
+    }, 2500);
+
+    // 5. Visibility Change / Tab Focus Instant Catch-up
+    const visibilityHandler = () => {
+      if (document.visibilityState === 'visible') {
+        this.getSession(sessionCode).then((s) => {
+          if (s) safeNotify(s);
+        });
+      }
+    };
+    document.addEventListener('visibilitychange', visibilityHandler);
+    window.addEventListener('focus', visibilityHandler);
 
     return () => {
       if (this.listeners.has(sessionCode)) {
         this.listeners.get(sessionCode).delete(callback);
       }
       if (cleanupSSE) cleanupSSE();
+      clearInterval(pollInterval);
       window.removeEventListener('storage', storageHandler);
+      document.removeEventListener('visibilitychange', visibilityHandler);
+      window.removeEventListener('focus', visibilityHandler);
     };
   }
 

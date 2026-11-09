@@ -14,6 +14,7 @@ export function renderGame1View(container, { sessionCode, teamNumber, isMemorize
   let sessionUnsubscribe = null;
   let userAnswers = {};
   let isSubmitted = false;
+  let currentSubMode = isMemorizePhase ? 'GAME1_MEMORIZE' : 'GAME1_PLAY';
 
   if (isMemorizePhase) {
     renderMemorizeMode();
@@ -23,10 +24,37 @@ export function renderGame1View(container, { sessionCode, teamNumber, isMemorize
 
   // Realtime Session listener to detect phase change from Admin
   sessionUnsubscribe = firebaseService.listenToSession(sessionCode, (session) => {
-    if (!session) return;
-    if (session.currentPhase && session.currentPhase !== (isMemorizePhase ? 'GAME1_MEMORIZE' : 'GAME1_PLAY')) {
-      cleanup();
-      if (onPhaseChange) onPhaseChange(session.currentPhase, session);
+    if (!session || !session.currentPhase) return;
+    const newPhase = session.currentPhase;
+
+    // Handle smooth internal sub-phase transitions (Memorize <-> Play)
+    if (newPhase === 'GAME1_PLAY') {
+      if (currentSubMode === 'GAME1_MEMORIZE') {
+        currentSubMode = 'GAME1_PLAY';
+        renderPlayMode();
+      }
+      return;
+    }
+
+    if (newPhase === 'GAME1_MEMORIZE') {
+      if (currentSubMode !== 'GAME1_MEMORIZE') {
+        currentSubMode = 'GAME1_MEMORIZE';
+        renderMemorizeMode();
+      }
+      return;
+    }
+
+    // Different game phase (GAME2, GAME3, FINISHED, LOBBY)
+    // If student was answering questions and hasn't clicked submit, auto-submit to prevent score loss
+    if (currentSubMode === 'GAME1_PLAY' && !isSubmitted && Object.keys(userAnswers).length > 0) {
+      try {
+        firebaseService.submitGame1(sessionCode, teamNumber, userAnswers).catch(() => {});
+      } catch (e) {}
+    }
+
+    cleanup();
+    if (onPhaseChange) {
+      onPhaseChange(newPhase, session);
     }
   });
 
@@ -94,6 +122,7 @@ export function renderGame1View(container, { sessionCode, teamNumber, isMemorize
           toast.warning('Waktu menghafal selesai! Bersiap menyusun informasi...');
           audio.playPhaseTransition();
           setTimeout(() => {
+            currentSubMode = 'GAME1_PLAY';
             renderPlayMode();
           }, 800);
         }
@@ -290,6 +319,12 @@ export function renderGame1View(container, { sessionCode, teamNumber, isMemorize
   }
 
   return {
-    destroy: cleanup
+    destroy: cleanup,
+    switchToPlayMode: () => {
+      if (currentSubMode === 'GAME1_MEMORIZE') {
+        currentSubMode = 'GAME1_PLAY';
+        renderPlayMode();
+      }
+    }
   };
 }

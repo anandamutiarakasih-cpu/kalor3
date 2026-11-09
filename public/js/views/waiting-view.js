@@ -89,6 +89,8 @@ export function renderWaitingView(container, { sessionCode, teamNumber, onPhaseC
 
     // Update 8 Teams Grid
     const teams = session.teams || {};
+    const now = firebaseService.getServerTime();
+
     for (let i = 1; i <= 8; i++) {
       const card = container.querySelector(`#lobby-team-${i}`);
       if (!card) continue;
@@ -97,9 +99,15 @@ export function renderWaitingView(container, { sessionCode, teamNumber, onPhaseC
       if (t && t.claimed) {
         card.classList.add('joined');
         card.querySelector('.tc-lobby-team-name').textContent = t.name || `Kelompok ${i}`;
-        card.querySelector('.tc-lobby-team-status').innerHTML = `
-          <span class="tc-dot-green"></span> Siap (${(t.members || []).length} siswa)
-        `;
+
+        const lastSeen = t.heartbeat?.lastSeen || t.joinedAt || 0;
+        const diffSec = Math.max(0, Math.floor((now - lastSeen) / 1000));
+        let statusBadge = `<span class="tc-dot-green"></span> Siap (${(t.members || []).length} siswa)`;
+        if (diffSec > 35) {
+          statusBadge = `<span class="tc-dot-yellow"></span> Menghubungkan ulang...`;
+        }
+
+        card.querySelector('.tc-lobby-team-status').innerHTML = statusBadge;
       } else {
         card.classList.remove('joined');
         card.querySelector('.tc-lobby-team-name').textContent = `Kelompok ${i}`;

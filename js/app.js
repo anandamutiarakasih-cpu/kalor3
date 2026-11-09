@@ -5,6 +5,8 @@
 
 import { particleService } from './services/particle-service.js';
 import { firebaseService } from './services/firebase-service.js';
+import { networkMonitor } from './services/network-monitor.js';
+import { audio } from './services/audio-service.js';
 import { toast } from './components/notification.js';
 import { renderHomeView } from './views/home-view.js';
 import { renderRegisterView } from './views/register-view.js';
@@ -32,6 +34,9 @@ class ThermoChampionsApp {
     if (this.canvas) {
       particleService.init(this.canvas);
     }
+
+    // Initialize Network & Latency Monitor
+    networkMonitor.init(() => firebaseService);
 
     // Confirmation warning on refresh or leaving while inside active session
     window.addEventListener('beforeunload', (e) => {
@@ -120,6 +125,11 @@ class ThermoChampionsApp {
   }
 
   routeByPhase(phase) {
+    // Play transition sound effect
+    try {
+      audio.playPhaseTransition();
+    } catch (e) {}
+
     switch (phase) {
       case 'LOBBY':
         this.navigate('waiting');
@@ -131,12 +141,15 @@ class ThermoChampionsApp {
         this.navigate('game1_play');
         break;
       case 'GAME2':
+        toast.info('Babak 2 Dimulai: Game Word Scramble!');
         this.navigate('game2');
         break;
       case 'GAME3':
+        toast.info('Babak 3 Dimulai: Extreme Addition (Kalkulasi Kalor)!');
         this.navigate('game3');
         break;
       case 'FINISHED':
+        toast.success('Seluruh Babak Selesai! Membuka Leaderboard...');
         this.navigate('leaderboard');
         break;
       default:
@@ -145,12 +158,28 @@ class ThermoChampionsApp {
   }
 
   navigate(route, params = {}) {
+    // 1. If already on the exact same active game route, prevent destructive unmount
+    if (this.currentRoute === route && (route === 'game1_play' || route === 'game2' || route === 'game3' || route === 'waiting')) {
+      return;
+    }
+
+    // 2. If student is in Game 1 Memorize and route shifts to Game 1 Play:
+    // Do NOT destroy view instance. Smoothly switch to play mode while preserving state!
+    if (this.currentRoute === 'game1_memorize' && route === 'game1_play') {
+      if (this.currentViewInstance && typeof this.currentViewInstance.switchToPlayMode === 'function') {
+        this.currentViewInstance.switchToPlayMode();
+        this.currentRoute = 'game1_play';
+        return;
+      }
+    }
+
     if (this.currentViewInstance && typeof this.currentViewInstance.destroy === 'function') {
       this.currentViewInstance.destroy();
       this.currentViewInstance = null;
     }
 
     this.currentRoute = route;
+    networkMonitor.setSessionContext(this.state.sessionCode, this.state.teamNumber);
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
     switch (route) {

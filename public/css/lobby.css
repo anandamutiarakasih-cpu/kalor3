@@ -676,9 +676,37 @@
   border: 1px solid rgba(34, 197, 94, 0.4);
 }
 
+.tc-atc-badge.warning {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  animation: pulseBadgeLag 1.5s infinite alternate;
+}
+
+@keyframes pulseBadgeLag {
+  from { opacity: 0.8; }
+  to { opacity: 1; border-color: #f59e0b; }
+}
+
 .tc-atc-badge.offline {
   background: rgba(255, 255, 255, 0.08);
   color: #64748b;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tc-pulse-dot.green {
+  background: #22c55e;
+  box-shadow: 0 0 6px #22c55e;
+}
+
+.tc-pulse-dot.yellow {
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+}
+
+.tc-pulse-dot.red {
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
 }
 
 .tc-atc-name {
