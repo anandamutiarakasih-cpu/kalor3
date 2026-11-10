@@ -245,7 +245,8 @@ class SocketService {
     const merged = { ...current, ...incoming };
     merged.teams = { ...(current.teams || {}), ...(incoming.teams || {}) };
 
-    for (let i = 1; i <= 8; i++) {
+    const maxCapacity = Math.max(8, Object.keys(incoming.teams || {}).length, Object.keys(current.teams || {}).length);
+    for (let i = 1; i <= maxCapacity; i++) {
       const tKey = `team_${i}`;
       if (current.teams?.[tKey] && incoming.teams?.[tKey]) {
         const ct = current.teams[tKey];
@@ -261,9 +262,13 @@ class SocketService {
 
     this.currentRoomState = merged;
 
-    try {
-      localStorage.setItem(`tc_session_${code}`, JSON.stringify(merged));
-    } catch (e) {}
+    // Debounced LocalStorage Write (avoids UI stutter on rapid 41-user events)
+    if (this._persistTimer) clearTimeout(this._persistTimer);
+    this._persistTimer = setTimeout(() => {
+      try {
+        localStorage.setItem(`tc_session_${code}`, JSON.stringify(merged));
+      } catch (e) {}
+    }, 350);
 
     if (this.broadcast) {
       try {
@@ -329,12 +334,13 @@ class SocketService {
         game1PlayTime: 75,
         game2WordTime: 20,
         game3TotalTime: 120,
-        maxTeams: 8,
+        maxTeams: 40,
         ...settings
       }
     };
 
-    for (let i = 1; i <= 8; i++) {
+    const teamSlots = room.settings.maxTeams || 40;
+    for (let i = 1; i <= teamSlots; i++) {
       room.teams[`team_${i}`] = {
         number: i,
         name: `Kelompok ${i}`,
@@ -837,8 +843,7 @@ class SocketService {
       room.currentPhase = 'LOBBY';
       room.phaseStartedAt = null;
       room.phaseEndsAt = null;
-      for (let i = 1; i <= 8; i++) {
-        const t = room.teams[`team_${i}`];
+      for (const t of Object.values(room.teams || {})) {
         if (t) {
           t.scores = { game1: 0, game2: 0, game3: 0, total: 0 };
           t.progress = { game1Submitted: false, game2Answers: {}, game3Answers: {} };
@@ -947,18 +952,20 @@ class SocketService {
       }
     });
 
-    // 5. LocalStorage polling for same device
-    const pollInterval = setInterval(() => {
-      try {
-        const raw = localStorage.getItem(`tc_session_${code}`);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed && JSON.stringify(parsed) !== JSON.stringify(this.currentRoomState)) {
+    // 5. Cross-tab storage synchronization (Event-driven, 0% CPU idle)
+    const onStorageChange = (e) => {
+      if (e && e.key === `tc_session_${code}` && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && parsed.code === code) {
             this.mergeAndNotify(parsed);
           }
-        }
-      } catch (e) {}
-    }, 1500);
+        } catch (err) {}
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', onStorageChange);
+    }
 
     return () => {
       unsubSupabase();
@@ -966,7 +973,9 @@ class SocketService {
       unsubMqttPhase();
       unsubMqttScore();
       unsubMqttPing();
-      clearInterval(pollInterval);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('storage', onStorageChange);
+      }
       const set = this.sessionListeners.get(code);
       if (set) {
         set.delete(callback);

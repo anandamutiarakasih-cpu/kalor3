@@ -36,7 +36,7 @@ app.use(cors({
 
 app.use(express.json());
 
-// Configure Socket.IO
+// Configure Socket.IO (Optimized for 41+ concurrent users in 1 room)
 const io = new SocketIOServer(server, {
   cors: {
     origin: '*', // Allow Vercel preview URLs, localhost, and custom domains
@@ -45,6 +45,10 @@ const io = new SocketIOServer(server, {
   },
   pingInterval: 10000,
   pingTimeout: 5000,
+  maxHttpBufferSize: 1e6,
+  perMessageDeflate: {
+    threshold: 1024
+  },
   transports: ['websocket', 'polling']
 });
 
@@ -64,14 +68,20 @@ app.get('/health', (req, res) => {
 
 app.get('/metrics', (req, res) => {
   const mem = process.memoryUsage();
+  const cpu = process.cpuUsage();
   res.status(200).json({
     uptimeSeconds: Math.round(process.uptime()),
     activeRooms: roomManager.rooms.size,
     connectedSockets: io.engine.clientsCount,
+    cpu: {
+      userMs: Math.round(cpu.user / 1000),
+      systemMs: Math.round(cpu.system / 1000)
+    },
     memory: {
-      rssMb: Math.round(mem.rss / 1024 / 1024),
-      heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
-      heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024)
+      rssMb: Math.round(mem.rss / 1024 / 1024 * 10) / 10,
+      heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024 * 10) / 10,
+      heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024 * 10) / 10,
+      externalMb: Math.round(mem.external / 1024 / 1024 * 10) / 10
     },
     rooms: Array.from(roomManager.rooms.values()).map(r => ({
       code: r.code,
