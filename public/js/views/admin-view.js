@@ -488,10 +488,10 @@ export function renderAdminView(container, { onExit }) {
           const latency = t.heartbeat?.latency || 0;
           const diffSec = Math.max(0, Math.floor((now - lastSeen) / 1000));
 
-          if (diffSec <= 30) {
+          if (diffSec <= 60) {
             badgeEl.className = 'tc-atc-badge online';
             badgeEl.innerHTML = `<span class="tc-pulse-dot green"></span> ONLINE ${latency ? `(${latency}ms)` : ''}`;
-          } else if (diffSec <= 75) {
+          } else if (diffSec <= 120) {
             badgeEl.className = 'tc-atc-badge warning';
             badgeEl.innerHTML = `<span class="tc-pulse-dot yellow"></span> LAG (${diffSec}s)`;
           } else {
@@ -561,10 +561,10 @@ export function renderAdminView(container, { onExit }) {
           const lastSeen = t.heartbeat?.lastSeen || t.joinedAt || 0;
           const latency = t.heartbeat?.latency || 0;
           const diffSec = Math.max(0, Math.floor((now - lastSeen) / 1000));
-          if (diffSec <= 30) {
+          if (diffSec <= 60) {
             badgeEl.className = 'tc-atc-badge online';
             badgeEl.innerHTML = `<span class="tc-pulse-dot green"></span> ONLINE ${latency ? `(${latency}ms)` : ''}`;
-          } else if (diffSec <= 75) {
+          } else if (diffSec <= 120) {
             badgeEl.className = 'tc-atc-badge warning';
             badgeEl.innerHTML = `<span class="tc-pulse-dot yellow"></span> LAG (${diffSec}s)`;
           } else {

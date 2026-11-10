@@ -33,11 +33,12 @@ export function renderWaitingView(container, { sessionCode, teamNumber, onPhaseC
       </div>
 
       <!-- Sync Status Notice -->
-      <div class="tc-sync-notice">
+      <div class="tc-sync-notice" id="btn-force-check-phase" style="cursor: pointer;" title="Ketuk untuk memeriksa sinyal dari guru">
         <div class="tc-radar-spinner"></div>
         <div class="tc-sync-text">
           <strong>Menunggu Instruksi Guru / Admin...</strong>
           <span>Tetap berada di halaman ini. Layar akan beralih secara otomatis saat permainan dimulai!</span>
+          <span style="display: inline-block; font-size: 0.75rem; color: #F59E0B; margin-top: 4px; font-weight: 600;">⚡ Ketuk di sini untuk menyegarkan sinyal guru</span>
         </div>
       </div>
 
@@ -115,6 +116,22 @@ export function renderWaitingView(container, { sessionCode, teamNumber, onPhaseC
       }
     }
   });
+
+  // Manual fast refresh on click
+  const refreshPill = container.querySelector('#btn-force-check-phase');
+  if (refreshPill) {
+    refreshPill.addEventListener('click', async () => {
+      audio.playClick();
+      try {
+        const s = await firebaseService.getSession(sessionCode);
+        if (s && s.currentPhase && s.currentPhase !== 'LOBBY') {
+          audio.playPhaseTransition();
+          if (unsubscribe) unsubscribe();
+          if (onPhaseChange) onPhaseChange(s.currentPhase, s);
+        }
+      } catch (e) {}
+    });
+  }
 
   return {
     destroy: () => {
