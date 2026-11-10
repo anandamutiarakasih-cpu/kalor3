@@ -1,5 +1,9 @@
-functions
-functions/**
-database.rules.json
-firebase.json
+# Vercel Ignore File for Static Frontend Deployment
+server/node_modules
+server/tests
+functions/node_modules
 .git
+.env
+.env.example
+database.rules.json
+supabase/
